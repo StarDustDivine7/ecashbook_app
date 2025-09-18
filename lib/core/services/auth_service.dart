@@ -1,0 +1,387 @@
+import 'dart:convert';
+import 'dart:io' show Platform;
+import 'package:dio/dio.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
+
+import '../config/api_config.dart';
+import '../network/api_client.dart';
+import '../models/login_response.dart';
+import '../models/employee_details.dart';
+
+// Results
+
+class PunchInResult {
+  final bool success;
+  final String message;
+  final String? errorCode;
+  PunchInResult({required this.success, required this.message, this.errorCode});
+  factory PunchInResult.fromJson(Map<String, dynamic> json) => PunchInResult(
+    success: json['success'] == true,
+    message: (json['message'] ?? '').toString(),
+    errorCode: json['error_code']?.toString(),
+  );
+}
+
+class LunchInResult {
+  final bool success;
+  final String message;
+  LunchInResult({required this.success, required this.message});
+  factory LunchInResult.fromJson(Map<String, dynamic> json) =>
+      LunchInResult(success: json['success'] == true, message: (json['message'] ?? '').toString());
+}
+
+class LunchOutResult {
+  final bool success;
+  final String message;
+  LunchOutResult({required this.success, required this.message});
+  factory LunchOutResult.fromJson(Map<String, dynamic> json) =>
+      LunchOutResult(success: json['success'] == true, message: (json['message'] ?? '').toString());
+}
+
+class BreakResult {
+  final bool success;
+  final String message;
+  BreakResult({required this.success, required this.message});
+  factory BreakResult.fromJson(Map<String, dynamic> json) =>
+      BreakResult(success: json['success'] == true, message: (json['message'] ?? '').toString());
+}
+
+class PunchOutResult {
+  final bool success;
+  final String message;
+  final Map<String, dynamic>? data;
+  PunchOutResult({required this.success, required this.message, this.data});
+  factory PunchOutResult.fromJson(Map<String, dynamic> json) => PunchOutResult(
+    success: json['success'] == true,
+    message: (json['message'] ?? '').toString(),
+    data: (json['data'] is Map) ? Map<String, dynamic>.from(json['data'] as Map) : null,
+  );
+}
+
+class AuthResult {
+  final bool success;
+  final String? message;
+  final String? token;
+  final String? tokenType;
+  final String? secure;
+  final User? user;
+  AuthResult({required this.success, this.message, this.token, this.tokenType, this.secure, this.user});
+}
+
+class AuthService {
+  // Keys
+  static const String _kToken = 'auth_token';
+  static const String _kTokenType = 'token_type';
+  static const String _kSecure = 'secure_hash';
+  static const String _kUser = 'user_data';
+  static const String _kLastAuth = 'last_auth_time';
+
+  // Storage
+  static Future<void> _saveAuthToken(String token) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kToken, token);
+  }
+
+  static Future<void> _saveTokenType(String type) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kTokenType, type);
+  }
+
+  static Future<void> _saveSecure(String secure) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kSecure, secure);
+  }
+
+  static Future<void> _saveUserData(User user) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kUser, jsonEncode(user.toJson()));
+  }
+
+  static Future<String?> getAuthToken() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kToken);
+  }
+
+  static Future<String?> getTokenType() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kTokenType);
+  }
+
+  static Future<String?> getSecure() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kSecure);
+  }
+
+  static Future<User?> getSavedUser() async {
+    final p = await SharedPreferences.getInstance();
+    final raw = p.getString(_kUser);
+    if (raw == null) return null;
+    try {
+      return User.fromJson(Map<String, dynamic>.from(jsonDecode(raw) as Map));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> saveAuthSession() async {
+    final p = await SharedPreferences.getInstance();
+    await p.setInt(_kLastAuth, DateTime.now().millisecondsSinceEpoch);
+  }
+
+  static Future<void> clearAuthSession() async {
+    final p = await SharedPreferences.getInstance();
+    await p.remove(_kLastAuth);
+    await p.remove(_kToken);
+    await p.remove(_kTokenType);
+    await p.remove(_kSecure);
+    await p.remove(_kUser);
+  }
+
+  static Future<bool> isSessionActive({Duration timeout = const Duration(minutes: 120)}) async {
+    final p = await SharedPreferences.getInstance();
+    final ts = p.getInt(_kLastAuth) ?? 0;
+    return DateTime.now().millisecondsSinceEpoch - ts < timeout.inMilliseconds;
+  }
+
+  // Location
+  static Future<Position?> getCurrentLocation() async {
+    try {
+      if (!await Permission.location.request().isGranted) return null;
+      // These are NOT const because Platform.isAndroid is runtime
+      final LocationSettings settings = Platform.isAndroid
+          ? AndroidSettings(accuracy: LocationAccuracy.high, distanceFilter: 10) // removed const
+          : AppleSettings(accuracy: LocationAccuracy.high, distanceFilter: 10);  // removed const
+      return await Geolocator.getCurrentPosition(locationSettings: settings);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String formatLocation(Position p) => 'Lat: ${p.latitude.toStringAsFixed(6)}, Lng: ${p.longitude.toStringAsFixed(6)}';
+
+  // HTTP helpers
+  static Future<Map<String, dynamic>> _authHeaders() async {
+    final token = await getAuthToken();
+    final type = await getTokenType() ?? 'Bearer';
+    final Map<String, dynamic> h = {'Content-Type': 'application/json', 'Accept': 'application/json'};
+    if (token != null && token.isNotEmpty) h['Authorization'] = '$type $token';
+    return h;
+  }
+
+  static String _handleNetworkError(DioException e) {
+    if (e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.receiveTimeout) {
+      return 'Network timeout';
+    }
+    final status = e.response?.statusCode ?? 0;
+    if (status == 401) return 'Unauthorized';
+    try {
+      final data = e.response?.data;
+      if (data is Map && data['message'] != null) return data['message'].toString();
+    } catch (_) {}
+    return 'Network error';
+  }
+
+  // Auth
+  static Future<AuthResult> loginWithAPI(String email, String password) async {
+    try {
+      final resp = await ApiClient.dio.post(ApiConfig.login, data: jsonEncode({'email': email, 'password': password}));
+      if (resp.statusCode == 200) {
+        final Map<String, dynamic> map =
+        resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        final login = LoginResponse.fromJson(map);
+        if (!login.success) return AuthResult(success: false, message: login.message);
+        await _saveAuthToken(login.data.token);
+        await _saveTokenType(login.data.tokenType);
+        await _saveSecure(login.data.secure);
+        await _saveUserData(login.data.user);
+        await saveAuthSession();
+        return AuthResult(success: true, token: login.data.token, tokenType: login.data.tokenType, secure: login.data.secure, user: login.data.user);
+      }
+      return AuthResult(success: false, message: 'Login failed');
+    } on DioException catch (e) {
+      return AuthResult(success: false, message: _handleNetworkError(e));
+    }
+  }
+
+  // Employee details
+  static Future<EmployeeDetailsResponse> fetchEmployeeDetails({
+    required String empId,
+    required String todayDate,
+    required String secure,
+  }) async {
+    final headers = await _authHeaders();
+    final body = {'empId': empId, 'today_date': todayDate, 'secure': secure};
+    final resp = await ApiClient.dio.post(ApiConfig.employeeDetails, data: jsonEncode(body), options: Options(headers: headers));
+    final Map<String, dynamic> map =
+    resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+    return EmployeeDetailsResponse.fromJson(map);
+  }
+
+  // Punch In
+  static Future<PunchInResult> punchIn({
+    required String todayDate,
+    required String punchInTime,
+    required String empId,
+    required String secure,
+    required double punchInLat,
+    required double punchInLong,
+    required String workLocationStatus,
+  }) async {
+    try {
+      final headers = await _authHeaders();
+      final body = {
+        'todayDate': todayDate,
+        'punchInTime': punchInTime,
+        'empId': empId,
+        'secure': secure,
+        'punchInLat': punchInLat,
+        'punchInLong': punchInLong,
+        'work_location_status': workLocationStatus,
+      };
+      final resp = await ApiClient.dio.post(ApiConfig.punchIn, data: jsonEncode(body), options: Options(headers: headers, validateStatus: (c) => true));
+      if (resp.statusCode == 409) {
+        final Map<String, dynamic> m =
+        resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        return PunchInResult(
+          success: false,
+          message: (m['message'] ?? 'Already punched in for today.').toString(),
+          errorCode: (m['error_code'] ?? 'ALREADY_PUNCHED_IN').toString(),
+        );
+      }
+      final Map<String, dynamic> map =
+      resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+      return PunchInResult.fromJson(map);
+    } on DioException catch (e) {
+      return PunchInResult(success: false, message: _handleNetworkError(e));
+    }
+  }
+
+  // Lunch In
+  static Future<LunchInResult> lunchIn({
+    required String todayDate,
+    required String lunchInTime,
+    required String empId,
+    required String secure,
+  }) async {
+    try {
+      final headers = await _authHeaders();
+      final body = {'todayDate': todayDate, 'lunchInTime': lunchInTime, 'empId': empId, 'secure': secure};
+      final resp = await ApiClient.dio.post(ApiConfig.lunchIn, data: jsonEncode(body), options: Options(headers: headers, validateStatus: (c) => true));
+      final Map<String, dynamic> map =
+      resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+      return LunchInResult.fromJson(map);
+    } on DioException catch (e) {
+      return LunchInResult(success: false, message: _handleNetworkError(e));
+    } catch (e) {
+      return LunchInResult(success: false, message: 'Lunch in failed');
+    }
+  }
+
+  // Lunch Out
+  static Future<LunchOutResult> lunchOut({
+    required String todayDate,
+    required String lunchOutTime,
+    required String empId,
+    required String secure,
+  }) async {
+    try {
+      final headers = await _authHeaders();
+      final body = {'todayDate': todayDate, 'lunchOutTime': lunchOutTime, 'empId': empId, 'secure': secure};
+      final resp = await ApiClient.dio.post(ApiConfig.lunchOut, data: jsonEncode(body), options: Options(headers: headers, validateStatus: (c) => true));
+      final Map<String, dynamic> map =
+      resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+      return LunchOutResult.fromJson(map);
+    } on DioException catch (e) {
+      return LunchOutResult(success: false, message: _handleNetworkError(e));
+    } catch (e) {
+      return LunchOutResult(success: false, message: 'Lunch out failed');
+    }
+  }
+
+  // Break In
+  static Future<BreakResult> breakIn({
+    required String breakDate,
+    required String breakInTime,
+    required String empId,
+    required String secure,
+  }) async {
+    try {
+      final headers = await _authHeaders();
+      final body = {'break_date': breakDate, 'break_in': breakInTime, 'empId': empId, 'secure': secure};
+      final resp = await ApiClient.dio.post(ApiConfig.breakIn, data: jsonEncode(body), options: Options(headers: headers, validateStatus: (c) => true));
+      final Map<String, dynamic> map =
+      resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+      return BreakResult.fromJson(map);
+    } on DioException catch (e) {
+      return BreakResult(success: false, message: _handleNetworkError(e));
+    } catch (e) {
+      return BreakResult(success: false, message: 'Break start failed');
+    }
+  }
+
+  // Break Out
+  static Future<BreakResult> breakOut({
+    required String breakDate,
+    required String breakOutTime,
+    required String empId,
+    required String secure,
+  }) async {
+    try {
+      final headers = await _authHeaders();
+      final body = {'break_date': breakDate, 'breakOutTime': breakOutTime, 'empId': empId, 'secure': secure};
+      final resp = await ApiClient.dio.post(ApiConfig.breakOut, data: jsonEncode(body), options: Options(headers: headers, validateStatus: (c) => true));
+      final Map<String, dynamic> map =
+      resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+      return BreakResult.fromJson(map);
+    } on DioException catch (e) {
+      return BreakResult(success: false, message: _handleNetworkError(e));
+    } catch (e) {
+      return BreakResult(success: false, message: 'Break end failed');
+    }
+  }
+
+  // NEW: Punch Out
+  static Future<PunchOutResult> punchOut({
+    required String todayDate,
+    required String punchOutTime,
+    required String empId,
+    required String secure,
+  }) async {
+    try {
+      final headers = await _authHeaders();
+      final body = {
+        'todayDate': todayDate,
+        'punchOutTime': punchOutTime,
+        'empId': empId,
+        'secure': secure,
+      };
+      final resp = await ApiClient.dio.post(
+        ApiConfig.punchOut,
+        data: jsonEncode(body),
+        options: Options(headers: headers, validateStatus: (c) => true),
+      );
+
+      if (resp.statusCode == 200) {
+        final Map<String, dynamic> map =
+        resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        return PunchOutResult.fromJson(map);
+      }
+
+      try {
+        final Map<String, dynamic> map =
+        resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        return PunchOutResult(success: false, message: (map['message'] ?? 'Punch out failed').toString(), data: map['data'] as Map<String, dynamic>?);
+      } catch (_) {
+        return PunchOutResult(success: false, message: 'Punch out failed');
+      }
+    } on DioException catch (e) {
+      return PunchOutResult(success: false, message: _handleNetworkError(e));
+    } catch (e) {
+      return PunchOutResult(success: false, message: 'Punch out failed');
+    }
+  }
+}

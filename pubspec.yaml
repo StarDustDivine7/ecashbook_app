@@ -1,0 +1,56 @@
+name: ecashbook_app
+description: "Employee management and payroll application with biometric authentication"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8       # Core UI & Design
+  google_fonts: ^6.3.0          # Core UI & Design
+  flutter_riverpod: ^2.6.1      # State Management
+  go_router: ^16.2.0            # Navigation & Routing
+  dio: ^5.9.0                   # Network & API
+  local_auth: ^2.3.0            # Security & Authentication
+  permission_handler: ^12.0.1   # Device Features
+  geolocator: ^14.0.2           # Device Features
+  camera: ^0.11.0+2             # Device Features
+  shared_preferences: ^2.5.3
+  pdf: ^3.11.3
+  printing: ^5.14.2
+  path_provider: ^2.1.5
+  device_info_plus: ^11.5.0
+  open_filex: ^4.7.0
+  share_plus: ^11.1.0
+  table_calendar: ^3.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.1
+
+# App Icon Configuration
+flutter_launcher_icons:
+  android: "ecashbook_icon"
+  ios: true
+  image_path: "assets/icon/icon_512.png"
+  adaptive_icon_background: "assets/icon/icon_background.png"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+  ios_content_margin: 0.15
+  min_sdk_android: 21
+  remove_alpha_ios: true
+
+
+flutter:
+  uses-material-design: true
+
+  # Assets Configuration
+  assets:
+    - assets/icon/
+    - assets/icons/
+    - assets/images/
