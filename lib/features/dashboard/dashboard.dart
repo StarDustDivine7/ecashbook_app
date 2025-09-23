@@ -41,7 +41,7 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
     super.initState();
     _punchController = AnimationController(duration: const Duration(milliseconds: 400), vsync: this);
     _breathingController = AnimationController(duration: const Duration(seconds: 3), vsync: this)..repeat(reverse: true);
-    _timer = Timer.periodic(const Duration(seconds: 1), (_) => mounted ? setState(() {}) : null);
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) { if (mounted) setState(() {}); });
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await ref.read(dashboardEmployeeProvider.notifier).load();
@@ -91,10 +91,12 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
 
     final isWFO = details.todayWorkLocation.toLowerCase() == 'work_from_office';
     if (!isWFO) {
-      setState(() {
-        _isInsideOffice = false;
-        _geoError = null;
-      });
+      if (mounted) {
+        setState(() {
+          _isInsideOffice = false;
+          _geoError = null;
+        });
+      }
       return;
     }
     await _fetchAndEvaluateLocation(details.officeLocation);
@@ -102,25 +104,31 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
 
   Future _fetchAndEvaluateLocation(OfficeLocation? office) async {
     if (office == null) {
-      setState(() {
-        _isInsideOffice = false;
-        _geoError = 'Office location not configured';
-      });
+      if (mounted) {
+        setState(() {
+          _isInsideOffice = false;
+          _geoError = 'Office location not configured';
+        });
+      }
       return;
     }
 
-    setState(() {
-      _isCheckingLocation = true;
-      _geoError = null;
-    });
+    if (mounted) {
+      setState(() {
+        _isCheckingLocation = true;
+        _geoError = null;
+      });
+    }
 
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        setState(() {
-          _isCheckingLocation = false;
-          _geoError = 'Location services are disabled';
-        });
+        if (mounted) {
+          setState(() {
+            _isCheckingLocation = false;
+            _geoError = 'Location services are disabled';
+          });
+        }
         return;
       }
 
@@ -128,18 +136,22 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
         if (permission == LocationPermission.denied) {
-          setState(() {
-            _isCheckingLocation = false;
-            _geoError = 'Location permission denied';
-          });
+          if (mounted) {
+            setState(() {
+              _isCheckingLocation = false;
+              _geoError = 'Location permission denied';
+            });
+          }
           return;
         }
       }
       if (permission == LocationPermission.deniedForever) {
-        setState(() {
-          _isCheckingLocation = false;
-          _geoError = 'Location permission permanently denied';
-        });
+        if (mounted) {
+          setState(() {
+            _isCheckingLocation = false;
+            _geoError = 'Location permission permanently denied';
+          });
+        }
         return;
       }
 
@@ -153,16 +165,20 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
         radiusUnit: office.radiusUnit,
       );
 
-      setState(() {
-        _isInsideOffice = inside;
-        _isCheckingLocation = false;
-        _geoError = null;
-      });
+      if (mounted) {
+        setState(() {
+          _isInsideOffice = inside;
+          _isCheckingLocation = false;
+          _geoError = null;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _isCheckingLocation = false;
-        _geoError = 'Unable to get location';
-      });
+      if (mounted) {
+        setState(() {
+          _isCheckingLocation = false;
+          _geoError = 'Unable to get location';
+        });
+      }
     }
   }
 
@@ -171,7 +187,7 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
     await _evaluateGeofenceOnceIfNeeded();
   }
 
-  // Punch In (unchanged)
+  // Punch In (unchanged behavior)
   Future _handlePunchInTap(EmployeeDetailsData? details) async {
     try {
       if (details == null) {
@@ -225,19 +241,95 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
         punchInLong: lng,
         workLocationStatus: workLocationStatus,
       );
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
-      await ref.read(dashboardEmployeeProvider.notifier).load();
-      await _evaluateGeofenceOnceIfNeeded();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
+        await ref.read(dashboardEmployeeProvider.notifier).load();
+        await _evaluateGeofenceOnceIfNeeded();
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Punch in failed')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Punch in failed')));
+      }
     }
   }
 
-  // NEW: Punch Out handler
+  // NEW: Confirm and perform Punch Out (shows confirm dialog + spinner while API runs)
+  Future _confirmAndPunchOut(EmployeeDetailsData? details) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        bool loading = false;
+        return StatefulBuilder(builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Confirm Punch Out'),
+            content: SizedBox(
+              height: 48,
+              child: loading
+                  ? Row(children: const [CircularProgressIndicator(), SizedBox(width: 16), Expanded(child: Text('Punching out...'))])
+                  : const Text('Are you sure you want to Punch Out?'),
+            ),
+            actions: [
+              if (!loading)
+                OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Colors.grey), // gray border
+                    foregroundColor: Colors.grey[800],          // text color
+                  ),
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('No'),
+                ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _errorRed,       // solid red background
+                  foregroundColor: Colors.white,    // white text
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8), // rounded corners
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                ),
+                onPressed: loading
+                    ? null
+                    : () async {
+                  setDialogState(() => loading = true);
+                  try {
+                    await _handlePunchOutTap(details);
+                  } catch (_) {
+                    // handled by snackbar
+                  } finally {
+                    if (mounted) {
+                      setDialogState(() => loading = false);
+                      Navigator.of(context).pop(true);
+                    } else {
+                      Navigator.of(context).pop(true);
+                    }
+                  }
+                },
+                child: loading
+                    ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                )
+                    : const Text('Yes'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+
+    return confirmed == true;
+  }
+
+  // Punch Out handler (same behavior but made safe - retained your geofence checks)
   Future _handlePunchOutTap(EmployeeDetailsData? details) async {
     try {
       if (details == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
         return;
       }
 
@@ -245,7 +337,7 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
       final todayWorkingStatus = (details.todayWorkingStatus ?? 'not_present').toLowerCase();
       final isPunchedIn = todayWorkingStatus != 'not_present';
       if (!isPunchedIn) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not punched in yet')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not punched in yet')));
         return;
       }
 
@@ -254,23 +346,27 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
       if (isWFO) {
         final office = details.officeLocation;
         if (office == null) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Office location not configured')));
+          if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Office location not configured')));
           return;
         }
 
-        setState(() {
-          _isCheckingLocation = true;
-          _geoError = null;
-        });
+        if (mounted) {
+          setState(() {
+            _isCheckingLocation = true;
+            _geoError = null;
+          });
+        }
 
         try {
           final serviceEnabled = await Geolocator.isLocationServiceEnabled();
           if (!serviceEnabled) {
-            setState(() {
-              _isCheckingLocation = false;
-              _geoError = 'Location services are disabled';
-            });
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location services are disabled')));
+            if (mounted) {
+              setState(() {
+                _isCheckingLocation = false;
+                _geoError = 'Location services are disabled';
+              });
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location services are disabled')));
+            }
             return;
           }
 
@@ -278,20 +374,24 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
           if (permission == LocationPermission.denied) {
             permission = await Geolocator.requestPermission();
             if (permission == LocationPermission.denied) {
-              setState(() {
-                _isCheckingLocation = false;
-                _geoError = 'Location permission denied';
-              });
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location permission denied')));
+              if (mounted) {
+                setState(() {
+                  _isCheckingLocation = false;
+                  _geoError = 'Location permission denied';
+                });
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location permission denied')));
+              }
               return;
             }
           }
           if (permission == LocationPermission.deniedForever) {
-            setState(() {
-              _isCheckingLocation = false;
-              _geoError = 'Location permission permanently denied';
-            });
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location permission permanently denied')));
+            if (mounted) {
+              setState(() {
+                _isCheckingLocation = false;
+                _geoError = 'Location permission permanently denied';
+              });
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location permission permanently denied')));
+            }
             return;
           }
 
@@ -305,22 +405,26 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
             radiusUnit: office.radiusUnit,
           );
 
-          setState(() {
-            _isInsideOffice = inside;
-            _isCheckingLocation = false;
-            _geoError = inside ? null : 'Outside office area';
-          });
+          if (mounted) {
+            setState(() {
+              _isInsideOffice = inside;
+              _isCheckingLocation = false;
+              _geoError = inside ? null : 'Outside office area';
+            });
+          }
 
           if (!inside) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('You are not in office location')));
+            if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('You are not in office location')));
             return;
           }
         } catch (e) {
-          setState(() {
-            _isCheckingLocation = false;
-            _geoError = 'Unable to get location';
-          });
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to get location')));
+          if (mounted) {
+            setState(() {
+              _isCheckingLocation = false;
+              _geoError = 'Unable to get location';
+            });
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Unable to get location')));
+          }
           return;
         }
       }
@@ -330,7 +434,7 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
       final empId = user?.employeeId ?? '';
       final secure = await AuthService.getSecure() ?? '';
       if (empId.isEmpty || secure.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing employee credentials')));
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing employee credentials')));
         return;
       }
 
@@ -345,20 +449,150 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
         secure: secure,
       );
 
-      if (res.success) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Complete Today Work')));
-        // Reload to get todayWorkingStatus
-        await ref.read(dashboardEmployeeProvider.notifier).load();
-        setState(() {}); // ensure rebuild
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message.isNotEmpty ? res.message : 'Punch out failed')));
+      if (mounted) {
+        if (res.success) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Complete Today Work')));
+          // Reload to get todayWorkingStatus
+          await ref.read(dashboardEmployeeProvider.notifier).load();
+          setState(() {}); // ensure rebuild
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message.isNotEmpty ? res.message : 'Punch out failed')));
+        }
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Punch out failed')));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Punch out failed')));
     }
   }
 
-  // Lunch In/Out and Break handlers remain as-is...
+  // Lunch In/Out and Break handlers
+  Future _handleLunchInTap(EmployeeDetailsData? details) async {
+    try {
+      if (details == null) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
+        return;
+      }
+      final user = await AuthService.getSavedUser();
+      final empId = user?.employeeId ?? '';
+      final secure = await AuthService.getSecure() ?? '';
+      if (empId.isEmpty || secure.isEmpty) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing employee credentials')));
+        return;
+      }
+      final now = DateTime.now();
+      final todayDate = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final lunchInTime = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+      final res = await AuthService.lunchIn(
+        todayDate: todayDate,
+        lunchInTime: lunchInTime,
+        empId: empId,
+        secure: secure,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
+        await ref.read(dashboardEmployeeProvider.notifier).load();
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lunch in failed')));
+    }
+  }
+
+  Future _handleLunchOutTap(EmployeeDetailsData? details) async {
+    try {
+      if (details == null) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
+        return;
+      }
+      final user = await AuthService.getSavedUser();
+      final empId = user?.employeeId ?? '';
+      final secure = await AuthService.getSecure() ?? '';
+      if (empId.isEmpty || secure.isEmpty) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing employee credentials')));
+        return;
+      }
+      final now = DateTime.now();
+      final todayDate = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final lunchOutTime = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+      final res = await AuthService.lunchOut(
+        todayDate: todayDate,
+        lunchOutTime: lunchOutTime,
+        empId: empId,
+        secure: secure,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
+        await ref.read(dashboardEmployeeProvider.notifier).load();
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lunch out failed')));
+    }
+  }
+
+  Future _handleBreakInTap(EmployeeDetailsData? details) async {
+    try {
+      if (details == null) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
+        return;
+      }
+      final user = await AuthService.getSavedUser();
+      final empId = user?.employeeId ?? '';
+      final secure = await AuthService.getSecure() ?? '';
+      if (empId.isEmpty || secure.isEmpty) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing employee credentials')));
+        return;
+      }
+      final now = DateTime.now();
+      final todayDate = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final breakInTime = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+      final res = await AuthService.breakIn(
+        breakDate: todayDate,
+        breakInTime: breakInTime,
+        empId: empId,
+        secure: secure,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
+        await ref.read(dashboardEmployeeProvider.notifier).load();
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Break in failed')));
+    }
+  }
+
+  Future _handleBreakOutTap(EmployeeDetailsData? details) async {
+    try {
+      if (details == null) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
+        return;
+      }
+      final user = await AuthService.getSavedUser();
+      final empId = user?.employeeId ?? '';
+      final secure = await AuthService.getSecure() ?? '';
+      if (empId.isEmpty || secure.isEmpty) {
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing employee credentials')));
+        return;
+      }
+      final now = DateTime.now();
+      final todayDate = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final breakOutTime = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+      final res = await AuthService.breakOut(
+        breakDate: todayDate,
+        breakOutTime: breakOutTime,
+        empId: empId,
+        secure: secure,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
+        await ref.read(dashboardEmployeeProvider.notifier).load();
+        setState(() {});
+      }
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Break out failed')));
+    }
+  }
+
 
   String _formatDuration(Duration d) => '${d.inHours}h ${d.inMinutes % 60}m';
 
@@ -394,8 +628,8 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
     // Derive statuses
     final todayWorkingStatus = (details?.todayWorkingStatus ?? 'not_present').toLowerCase();
     final isPunchedIn = todayWorkingStatus != 'not_present' && todayWorkingStatus != 'punch_out';
-    final isLunch = todayWorkingStatus == 'lunch';
-    final isOnBreak = data.isOnBreak;
+    final isLunch = details?.lunchStatus == 'ongoing';
+    final isOnBreak = details?.breakStatus == 'ongoing';
     final isWorkComplete = todayWorkingStatus == 'punch_out';
 
     return Scaffold(
@@ -412,8 +646,6 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
                 const SizedBox(height: 24),
                 _buildOfficeAddressCard(details),
                 const SizedBox(height: 24),
-
-                // Punch card shows "Today Work Complete" when status == punch_out
                 _buildPunchCard(
                   isPunchedIn,
                   isWorkComplete
@@ -444,9 +676,8 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
                   details: details,
                   workCompleted: isWorkComplete,
                 ),
-
                 const SizedBox(height: 24),
-                _buildActionGrid(isPunchedIn: isPunchedIn, isLunch: isLunch, isOnBreak: isOnBreak, notifier: notifier),
+                _buildActionGrid(isPunchedIn: isPunchedIn, details: details),
                 const SizedBox(height: 24),
                 _buildTodayMetrics(data.totalTiffinTime, data.totalBreakTime, data),
                 const SizedBox(height: 24),
@@ -619,8 +850,17 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
               width: 140,
               height: 140,
               decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(colors: [isPunchedIn ? _errorRed : _primaryPurple, isPunchedIn ? const Color(0xFFFF6B6B) : _primaryDark], begin: Alignment.topLeft, end: Alignment.bottomRight)),
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: isPunchedIn
+                      ? [_errorRed, const Color(0xFFFF6B6B)] // 🔴 Punch Out
+                      : (canPunchIn
+                      ? [_primaryPurple, _primaryDark] // 🟣 Punch In
+                      : [Colors.amber, Colors.orange]), // 🟡 On the Way
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+              ),
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
@@ -632,29 +872,58 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
                       if (canPunchIn) {
                         await _handlePunchInTap(details);
                       } else {
-                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Be inside office area to punch in')));
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Be inside office area to punch in')),
+                          );
+                        }
                       }
                     } else {
-                      await _handlePunchOutTap(details);
+                      // show confirm dialog and proceed if confirmed
+                      final didConfirm = await _confirmAndPunchOut(details);
+                      // _confirmAndPunchOut will call _handlePunchOutTap itself if Yes pressed
+                      if (!didConfirm) {
+                        // user cancelled, nothing to do
+                      }
                     }
                   },
                   borderRadius: BorderRadius.circular(70),
-                  child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Icon(isPunchedIn ? Icons.logout_rounded : Icons.login_rounded, size: 36, color: Colors.white),
-                    const SizedBox(height: 8),
-                    Text(isPunchedIn ? 'Punch Out' : (canPunchIn ? 'Punch In' : 'On the Way'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
-                    const SizedBox(height: 6),
-                    Container(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        isPunchedIn ? Icons.logout_rounded : (canPunchIn ? Icons.login_rounded : Icons.directions_run_rounded),
+                        size: 36,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        isPunchedIn ? 'Punch Out' : (canPunchIn ? 'Punch In' : 'On the Way'),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.25), borderRadius: BorderRadius.circular(12)),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                         child: Text(
-                            _isCheckingLocation
-                                ? 'CHECKING...'
-                                : isPunchedIn
-                                ? 'TAP TO START'
-                                : (showGeoGate ? 'WITHIN OFFICE AREA REQUIRED' : 'TAP TO START'),
-                            style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.white, letterSpacing: 1))),
-                  ]),
+                          _isCheckingLocation ? 'CHECKING...' : isPunchedIn ? 'TAP TO START' : (canPunchIn ? 'Tap To Start' : 'Going To Office'),
+                          style: const TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -674,8 +943,11 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
     );
   }
 
-  Widget _buildActionGrid({required bool isPunchedIn, required bool isLunch, required bool isOnBreak, required EnhancedDashboardNotifier notifier}) {
-    final canStartBreak = isPunchedIn && !isLunch;
+  Widget _buildActionGrid({required bool isPunchedIn, required EmployeeDetailsData? details}) {
+    final isLunchOngoing = details?.lunchStatus == 'ongoing';
+    final isLunchComplete = details?.lunchStatus == 'complete';
+    final isBreakOngoing = details?.breakStatus == 'ongoing';
+    final canStartBreakOrLunch = isPunchedIn && !isLunchOngoing && !isBreakOngoing;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -684,26 +956,34 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
         const SizedBox(height: 16),
         Row(children: [
           Expanded(
-              child: _buildActionCard(isOnBreak ? 'Break End' : 'Break Time', Icons.coffee_rounded, _accentBlue, isOnBreak, canStartBreak || isOnBreak, () async {
-                if (isLunch) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('End lunch before break')));
-                  return;
-                }
-                if (isOnBreak) {
-                  await _handleBreakOutTap(notifier);
-                } else {
-                  await _handleBreakInTap(notifier);
-                }
-              })),
+              child: _buildActionCard(
+                  isBreakOngoing ? 'Break End' : 'Break Time',
+                  Icons.coffee_rounded,
+                  _accentBlue,
+                  isBreakOngoing,
+                  isPunchedIn,
+                      () async {
+                    if (isBreakOngoing) {
+                      await _handleBreakOutTap(details);
+                    } else if (canStartBreakOrLunch) {
+                      await _handleBreakInTap(details);
+                    }
+                  })),
           const SizedBox(width: 12),
           Expanded(
-              child: _buildActionCard(isLunch ? 'Lunch End' : 'Tiffin Time', Icons.restaurant_rounded, _accentOrange, isLunch, isPunchedIn, () async {
-                if (isLunch) {
-                  await _handleLunchOutTap();
-                } else {
-                  await _handleLunchInTap();
-                }
-              })),
+              child: _buildActionCard(
+                  isLunchOngoing ? 'Lunch End' : isLunchComplete ? 'Today\'s Lunch Complete' : 'Tiffin Time',
+                  Icons.restaurant_rounded,
+                  _accentOrange,
+                  isLunchOngoing,
+                  isPunchedIn && !isLunchComplete,
+                      () async {
+                    if (isLunchOngoing) {
+                      await _handleLunchOutTap(details);
+                    } else if (canStartBreakOrLunch) {
+                      await _handleLunchInTap(details);
+                    }
+                  })),
         ]),
         const SizedBox(height: 12),
         Row(children: [
@@ -777,10 +1057,4 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
 
   Widget _buildTodayTasks() => const SizedBox.shrink();
   Widget _buildRecentActivity(List activities) => const SizedBox.shrink();
-
-  // Existing Break/Lunch handlers omitted here for brevity (unchanged)
-  Future _handleLunchInTap() async {/* existing code */}
-  Future _handleLunchOutTap() async {/* existing code */}
-  Future _handleBreakInTap(EnhancedDashboardNotifier notifier) async {/* existing code */}
-  Future _handleBreakOutTap(EnhancedDashboardNotifier notifier) async {/* existing code */}
 }

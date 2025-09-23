@@ -16,8 +16,10 @@ class PunchInResult {
   final bool success;
   final String message;
   final String? errorCode;
+
   PunchInResult({required this.success, required this.message, this.errorCode});
-  factory PunchInResult.fromJson(Map<String, dynamic> json) => PunchInResult(
+
+  factory PunchInResult.fromJson(Map json) => PunchInResult(
     success: json['success'] == true,
     message: (json['message'] ?? '').toString(),
     errorCode: json['error_code']?.toString(),
@@ -27,36 +29,44 @@ class PunchInResult {
 class LunchInResult {
   final bool success;
   final String message;
+
   LunchInResult({required this.success, required this.message});
-  factory LunchInResult.fromJson(Map<String, dynamic> json) =>
+
+  factory LunchInResult.fromJson(Map json) =>
       LunchInResult(success: json['success'] == true, message: (json['message'] ?? '').toString());
 }
 
 class LunchOutResult {
   final bool success;
   final String message;
+
   LunchOutResult({required this.success, required this.message});
-  factory LunchOutResult.fromJson(Map<String, dynamic> json) =>
+
+  factory LunchOutResult.fromJson(Map json) =>
       LunchOutResult(success: json['success'] == true, message: (json['message'] ?? '').toString());
 }
 
 class BreakResult {
   final bool success;
   final String message;
+
   BreakResult({required this.success, required this.message});
-  factory BreakResult.fromJson(Map<String, dynamic> json) =>
+
+  factory BreakResult.fromJson(Map json) =>
       BreakResult(success: json['success'] == true, message: (json['message'] ?? '').toString());
 }
 
 class PunchOutResult {
   final bool success;
   final String message;
-  final Map<String, dynamic>? data;
+  final Map? data;
+
   PunchOutResult({required this.success, required this.message, this.data});
-  factory PunchOutResult.fromJson(Map<String, dynamic> json) => PunchOutResult(
+
+  factory PunchOutResult.fromJson(Map json) => PunchOutResult(
     success: json['success'] == true,
     message: (json['message'] ?? '').toString(),
-    data: (json['data'] is Map) ? Map<String, dynamic>.from(json['data'] as Map) : null,
+    data: (json['data'] is Map) ? Map.from(json['data'] as Map) : null,
   );
 }
 
@@ -67,6 +77,7 @@ class AuthResult {
   final String? tokenType;
   final String? secure;
   final User? user;
+
   AuthResult({required this.success, this.message, this.token, this.tokenType, this.secure, this.user});
 }
 
@@ -77,6 +88,7 @@ class AuthService {
   static const String _kSecure = 'secure_hash';
   static const String _kUser = 'user_data';
   static const String _kLastAuth = 'last_auth_time';
+  static const String _kDeviceToken = 'device_token';
 
   // Storage
   static Future<void> _saveAuthToken(String token) async {
@@ -119,7 +131,7 @@ class AuthService {
     final raw = p.getString(_kUser);
     if (raw == null) return null;
     try {
-      return User.fromJson(Map<String, dynamic>.from(jsonDecode(raw) as Map));
+      return User.fromJson(Map.from(jsonDecode(raw) as Map));
     } catch (_) {
       return null;
     }
@@ -145,29 +157,45 @@ class AuthService {
     return DateTime.now().millisecondsSinceEpoch - ts < timeout.inMilliseconds;
   }
 
+  // Optionally store a device token if fetched elsewhere
+  static Future<void> saveDeviceToken(String token) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kDeviceToken, token);
+  }
+
+  static Future<String?> getDeviceToken() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kDeviceToken);
+  }
+
   // Location
   static Future<Position?> getCurrentLocation() async {
     try {
       if (!await Permission.location.request().isGranted) return null;
-      // These are NOT const because Platform.isAndroid is runtime
       final LocationSettings settings = Platform.isAndroid
-          ? AndroidSettings(accuracy: LocationAccuracy.high, distanceFilter: 10) // removed const
-          : AppleSettings(accuracy: LocationAccuracy.high, distanceFilter: 10);  // removed const
+          ? AndroidSettings(accuracy: LocationAccuracy.high, distanceFilter: 10)
+          : AppleSettings(accuracy: LocationAccuracy.high, distanceFilter: 10);
       return await Geolocator.getCurrentPosition(locationSettings: settings);
     } catch (_) {
       return null;
     }
   }
 
-  static String formatLocation(Position p) => 'Lat: ${p.latitude.toStringAsFixed(6)}, Lng: ${p.longitude.toStringAsFixed(6)}';
+  static String formatLocation(Position p) =>
+      'Lat: ${p.latitude.toStringAsFixed(6)}, Lng: ${p.longitude.toStringAsFixed(6)}';
 
   // HTTP helpers
-  static Future<Map<String, dynamic>> _authHeaders() async {
+  static Future<Map<String, String>> _authHeaders() async {
     final token = await getAuthToken();
     final type = await getTokenType() ?? 'Bearer';
-    final Map<String, dynamic> h = {'Content-Type': 'application/json', 'Accept': 'application/json'};
+    final Map<String, String> h = {'Content-Type': 'application/json', 'Accept': 'application/json'};
     if (token != null && token.isNotEmpty) h['Authorization'] = '$type $token';
     return h;
+  }
+
+  // Public method to get auth headers
+  static Future<Map<String, String>> getAuthHeaders() async {
+    return await _authHeaders();
   }
 
   static String _handleNetworkError(DioException e) {
@@ -188,22 +216,56 @@ class AuthService {
   // Auth
   static Future<AuthResult> loginWithAPI(String email, String password) async {
     try {
-      final resp = await ApiClient.dio.post(ApiConfig.login, data: jsonEncode({'email': email, 'password': password}));
+      // Resolve device token; if not saved, use a placeholder to match API contract
+      final savedDeviceToken = await getDeviceToken();
+      final deviceToken = (savedDeviceToken == null || savedDeviceToken.isEmpty)
+          ? 'Fetch_Device_phone_token'
+          : savedDeviceToken;
+
+      final deviceType = Platform.isAndroid ? 'android' : 'ios';
+
+      final body = {
+        'email': email,
+        'password': password,
+        'device_token': deviceToken,
+        'device_type': deviceType,
+      };
+
+      final resp = await ApiClient.dio.post(
+        ApiConfig.login,
+        data: jsonEncode(body),
+      );
+
       if (resp.statusCode == 200) {
-        final Map<String, dynamic> map =
-        resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        final Map<String, dynamic> map = resp.data is Map
+            ? Map<String, dynamic>.from(resp.data as Map)
+            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+
         final login = LoginResponse.fromJson(map);
-        if (!login.success) return AuthResult(success: false, message: login.message);
+        if (!login.success) {
+          return AuthResult(success: false, message: login.message);
+        }
+
         await _saveAuthToken(login.data.token);
         await _saveTokenType(login.data.tokenType);
         await _saveSecure(login.data.secure);
         await _saveUserData(login.data.user);
         await saveAuthSession();
-        return AuthResult(success: true, token: login.data.token, tokenType: login.data.tokenType, secure: login.data.secure, user: login.data.user);
+
+        return AuthResult(
+          success: true,
+          token: login.data.token,
+          tokenType: login.data.tokenType,
+          secure: login.data.secure,
+          user: login.data.user,
+        );
       }
+
       return AuthResult(success: false, message: 'Login failed');
     } on DioException catch (e) {
       return AuthResult(success: false, message: _handleNetworkError(e));
+    } catch (_) {
+      return AuthResult(success: false, message: 'Login failed');
     }
   }
 
@@ -215,9 +277,14 @@ class AuthService {
   }) async {
     final headers = await _authHeaders();
     final body = {'empId': empId, 'today_date': todayDate, 'secure': secure};
-    final resp = await ApiClient.dio.post(ApiConfig.employeeDetails, data: jsonEncode(body), options: Options(headers: headers));
-    final Map<String, dynamic> map =
-    resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+    final resp = await ApiClient.dio.post(
+      ApiConfig.employeeDetails,
+      data: jsonEncode(body),
+      options: Options(headers: headers),
+    );
+    final Map<String, dynamic> map = resp.data is Map
+        ? Map<String, dynamic>.from(resp.data as Map)
+        : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
     return EmployeeDetailsResponse.fromJson(map);
   }
 
@@ -242,21 +309,36 @@ class AuthService {
         'punchInLong': punchInLong,
         'work_location_status': workLocationStatus,
       };
-      final resp = await ApiClient.dio.post(ApiConfig.punchIn, data: jsonEncode(body), options: Options(headers: headers, validateStatus: (c) => true));
+      final resp = await ApiClient.dio.post(
+        ApiConfig.punchIn,
+        data: jsonEncode(body),
+        options: Options(headers: headers, validateStatus: (c) => true),
+      );
       if (resp.statusCode == 409) {
-        final Map<String, dynamic> m =
-        resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        final Map<String, dynamic> m = resp.data is Map
+            ? Map<String, dynamic>.from(resp.data as Map)
+            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
         return PunchInResult(
           success: false,
           message: (m['message'] ?? 'Already punched in for today.').toString(),
           errorCode: (m['error_code'] ?? 'ALREADY_PUNCHED_IN').toString(),
         );
       }
-      final Map<String, dynamic> map =
-      resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
-      return PunchInResult.fromJson(map);
+      try {
+        final Map<String, dynamic> map = resp.data is Map
+            ? Map<String, dynamic>.from(resp.data as Map)
+            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        return PunchInResult.fromJson(map);
+      } on FormatException {
+        return PunchInResult(
+          success: false,
+          message: 'Invalid response from server.',
+        );
+      }
     } on DioException catch (e) {
       return PunchInResult(success: false, message: _handleNetworkError(e));
+    } catch (_) {
+      return PunchInResult(success: false, message: 'Punch in failed');
     }
   }
 
@@ -270,13 +352,25 @@ class AuthService {
     try {
       final headers = await _authHeaders();
       final body = {'todayDate': todayDate, 'lunchInTime': lunchInTime, 'empId': empId, 'secure': secure};
-      final resp = await ApiClient.dio.post(ApiConfig.lunchIn, data: jsonEncode(body), options: Options(headers: headers, validateStatus: (c) => true));
-      final Map<String, dynamic> map =
-      resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
-      return LunchInResult.fromJson(map);
+      final resp = await ApiClient.dio.post(
+        ApiConfig.lunchIn,
+        data: jsonEncode(body),
+        options: Options(headers: headers, validateStatus: (c) => true),
+      );
+      try {
+        final Map<String, dynamic> map = resp.data is Map
+            ? Map<String, dynamic>.from(resp.data as Map)
+            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        return LunchInResult.fromJson(map);
+      } on FormatException {
+        return LunchInResult(
+          success: false,
+          message: 'Invalid response from server.',
+        );
+      }
     } on DioException catch (e) {
       return LunchInResult(success: false, message: _handleNetworkError(e));
-    } catch (e) {
+    } catch (_) {
       return LunchInResult(success: false, message: 'Lunch in failed');
     }
   }
@@ -291,13 +385,25 @@ class AuthService {
     try {
       final headers = await _authHeaders();
       final body = {'todayDate': todayDate, 'lunchOutTime': lunchOutTime, 'empId': empId, 'secure': secure};
-      final resp = await ApiClient.dio.post(ApiConfig.lunchOut, data: jsonEncode(body), options: Options(headers: headers, validateStatus: (c) => true));
-      final Map<String, dynamic> map =
-      resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
-      return LunchOutResult.fromJson(map);
+      final resp = await ApiClient.dio.post(
+        ApiConfig.lunchOut,
+        data: jsonEncode(body),
+        options: Options(headers: headers, validateStatus: (c) => true),
+      );
+      try {
+        final Map<String, dynamic> map = resp.data is Map
+            ? Map<String, dynamic>.from(resp.data as Map)
+            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        return LunchOutResult.fromJson(map);
+      } on FormatException {
+        return LunchOutResult(
+          success: false,
+          message: 'Invalid response from server.',
+        );
+      }
     } on DioException catch (e) {
       return LunchOutResult(success: false, message: _handleNetworkError(e));
-    } catch (e) {
+    } catch (_) {
       return LunchOutResult(success: false, message: 'Lunch out failed');
     }
   }
@@ -312,13 +418,25 @@ class AuthService {
     try {
       final headers = await _authHeaders();
       final body = {'break_date': breakDate, 'break_in': breakInTime, 'empId': empId, 'secure': secure};
-      final resp = await ApiClient.dio.post(ApiConfig.breakIn, data: jsonEncode(body), options: Options(headers: headers, validateStatus: (c) => true));
-      final Map<String, dynamic> map =
-      resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
-      return BreakResult.fromJson(map);
+      final resp = await ApiClient.dio.post(
+        ApiConfig.breakIn,
+        data: jsonEncode(body),
+        options: Options(headers: headers, validateStatus: (c) => true),
+      );
+      try {
+        final Map<String, dynamic> map = resp.data is Map
+            ? Map<String, dynamic>.from(resp.data as Map)
+            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        return BreakResult.fromJson(map);
+      } on FormatException {
+        return BreakResult(
+          success: false,
+          message: 'Invalid response from server.',
+        );
+      }
     } on DioException catch (e) {
       return BreakResult(success: false, message: _handleNetworkError(e));
-    } catch (e) {
+    } catch (_) {
       return BreakResult(success: false, message: 'Break start failed');
     }
   }
@@ -333,18 +451,30 @@ class AuthService {
     try {
       final headers = await _authHeaders();
       final body = {'break_date': breakDate, 'breakOutTime': breakOutTime, 'empId': empId, 'secure': secure};
-      final resp = await ApiClient.dio.post(ApiConfig.breakOut, data: jsonEncode(body), options: Options(headers: headers, validateStatus: (c) => true));
-      final Map<String, dynamic> map =
-      resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
-      return BreakResult.fromJson(map);
+      final resp = await ApiClient.dio.post(
+        ApiConfig.breakOut,
+        data: jsonEncode(body),
+        options: Options(headers: headers, validateStatus: (c) => true),
+      );
+      try {
+        final Map<String, dynamic> map = resp.data is Map
+            ? Map<String, dynamic>.from(resp.data as Map)
+            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        return BreakResult.fromJson(map);
+      } on FormatException {
+        return BreakResult(
+          success: false,
+          message: 'Invalid response from server.',
+        );
+      }
     } on DioException catch (e) {
       return BreakResult(success: false, message: _handleNetworkError(e));
-    } catch (e) {
+    } catch (_) {
       return BreakResult(success: false, message: 'Break end failed');
     }
   }
 
-  // NEW: Punch Out
+  // Punch Out
   static Future<PunchOutResult> punchOut({
     required String todayDate,
     required String punchOutTime,
@@ -364,23 +494,21 @@ class AuthService {
         data: jsonEncode(body),
         options: Options(headers: headers, validateStatus: (c) => true),
       );
-
-      if (resp.statusCode == 200) {
-        final Map<String, dynamic> map =
-        resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
-        return PunchOutResult.fromJson(map);
-      }
-
       try {
-        final Map<String, dynamic> map =
-        resp.data is Map ? Map<String, dynamic>.from(resp.data as Map) : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
-        return PunchOutResult(success: false, message: (map['message'] ?? 'Punch out failed').toString(), data: map['data'] as Map<String, dynamic>?);
-      } catch (_) {
-        return PunchOutResult(success: false, message: 'Punch out failed');
+        final Map<String, dynamic> map = resp.data is Map
+            ? Map<String, dynamic>.from(resp.data as Map)
+            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+        return PunchOutResult.fromJson(map);
+      } on FormatException {
+        return PunchOutResult(
+          success: false,
+          message: 'Invalid response from server.',
+          data: null,
+        );
       }
     } on DioException catch (e) {
       return PunchOutResult(success: false, message: _handleNetworkError(e));
-    } catch (e) {
+    } catch (_) {
       return PunchOutResult(success: false, message: 'Punch out failed');
     }
   }

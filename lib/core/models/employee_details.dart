@@ -10,11 +10,11 @@ class EmployeeDetailsResponse {
     required this.data,
   });
 
-  factory EmployeeDetailsResponse.fromJson(Map<String, dynamic> json) {
+  factory EmployeeDetailsResponse.fromJson(Map json) {
     return EmployeeDetailsResponse(
       success: json['success'] == true,
-      message: (json['message'] ?? '').toString(),
-      data: EmployeeDetailsData.fromJson(json['data'] as Map<String, dynamic>),
+      message: json['message']?.toString() ?? '',
+      data: EmployeeDetailsData.fromJson(json['data'] as Map),
     );
   }
 
@@ -36,7 +36,10 @@ class EmployeeDetailsData {
   final String departmentName;
   final String designationName;
   final String todayWorkLocation;
-  final String todayWorkingStatus;
+  final String todayWorkingStatus; // NEW (from API)
+  final String attendanceStatus; // present | not_present | punch_out
+  final String lunchStatus; // pending | ongoing | complete
+  final String breakStatus; // not_break | ongoing
   final OfficeLocation? officeLocation;
 
   EmployeeDetailsData({
@@ -51,25 +54,31 @@ class EmployeeDetailsData {
     required this.designationName,
     required this.todayWorkLocation,
     required this.todayWorkingStatus,
+    required this.attendanceStatus,
+    required this.lunchStatus,
+    required this.breakStatus,
     required this.officeLocation,
   });
 
-  factory EmployeeDetailsData.fromJson(Map<String, dynamic> json) {
+  factory EmployeeDetailsData.fromJson(Map json) {
     return EmployeeDetailsData(
-      date: (json['date'] ?? '').toString(),
-      name: (json['name'] ?? '').toString(),
-      status: (json['status'] ?? '').toString(),
-      employeeId: (json['employee_id'] ?? '').toString(),
-      email: (json['email'] ?? '').toString(),
-      gender: (json['gender'] ?? '').toString(),
+      date: json['date']?.toString() ?? '',
+      name: json['name']?.toString() ?? '',
+      status: json['status']?.toString() ?? '',
+      employeeId: json['employee_id']?.toString() ?? '',
+      email: json['email']?.toString() ?? '',
+      gender: json['gender']?.toString() ?? '',
       profileImg: json['profile_img']?.toString(),
-      departmentName: (json['department_name'] ?? '').toString(),
-      designationName: (json['designation_name'] ?? '').toString(),
-      todayWorkLocation: (json['today_work_location'] ?? '').toString(),
-      todayWorkingStatus: (json['todayWorkingStatus'] ?? '').toString(),
+      departmentName: json['department_name']?.toString() ?? '',
+      designationName: json['designation_name']?.toString() ?? '',
+      todayWorkLocation: json['today_work_location']?.toString() ?? '',
+      todayWorkingStatus: json['todayWorkingStatus']?.toString() ?? '',
+      attendanceStatus: json['attendance_status']?.toString() ?? '',
+      lunchStatus: json['lunch_status']?.toString() ?? '',
+      breakStatus: json['break_status']?.toString() ?? '',
       officeLocation: json['office_location'] == null
           ? null
-          : OfficeLocation.fromJson(json['office_location'] as Map<String, dynamic>),
+          : OfficeLocation.fromJson(json['office_location'] as Map),
     );
   }
 
@@ -85,6 +94,9 @@ class EmployeeDetailsData {
     'designation_name': designationName,
     'today_work_location': todayWorkLocation,
     'todayWorkingStatus': todayWorkingStatus,
+    'attendance_status': attendanceStatus,
+    'lunch_status': lunchStatus,
+    'break_status': breakStatus,
     'office_location': officeLocation?.toJson(),
   };
 }
@@ -108,15 +120,15 @@ class OfficeLocation {
     required this.radiusUnit,
   });
 
-  factory OfficeLocation.fromJson(Map<String, dynamic> json) {
+  factory OfficeLocation.fromJson(Map json) {
     return OfficeLocation(
       id: (json['id'] ?? 0) as int,
-      locationName: (json['location_name'] ?? '').toString(),
-      locationType: (json['location_type'] ?? '').toString(),
-      latitude: (json['latitude'] ?? '').toString(),
-      longitude: (json['longitude'] ?? '').toString(),
+      locationName: json['location_name']?.toString() ?? '',
+      locationType: json['location_type']?.toString() ?? '',
+      latitude: json['latitude']?.toString() ?? '',
+      longitude: json['longitude']?.toString() ?? '',
       radius: (json['radius'] ?? 0) as int,
-      radiusUnit: (json['radius_unit'] ?? '').toString(),
+      radiusUnit: json['radius_unit']?.toString() ?? 'meters',
     );
   }
 

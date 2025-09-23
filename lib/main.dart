@@ -33,7 +33,7 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
     WidgetsBinding.instance.addObserver(this);
     _setupScreenStateListener();
     BiometricNotifier.setNavigatorKey(navigatorKey);
-    debugPrint('🚀 EcashBook App Started');
+
   }
 
   @override
@@ -122,7 +122,7 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
       if (!mounted) return null;
       try {
         final biometricNotifier = ref.read(biometricProvider.notifier);
-        debugPrint('📱 Platform lifecycle message: $message');
+
         if (message == AppLifecycleState.resumed.toString()) {
           biometricNotifier.onScreenStateChanged(true);
         } else if (message == AppLifecycleState.paused.toString() || message == AppLifecycleState.inactive.toString()) {
@@ -185,7 +185,7 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
           onGenerateRoute: (settings) => _generateRoute(settings, authState),
         );
       } catch (e) {
-        debugPrint('❌ Provider access error: $e');
+
         return _buildErrorApp();
       }
     });
@@ -196,7 +196,7 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
   }
 
   Route _generateRoute(RouteSettings settings, AuthState authState) {
-    debugPrint('🧭 Navigating to: ${settings.name}');
+
     switch (settings.name) {
       case '/resolver':
         return MaterialPageRoute(builder: (_) => _StartupResolver(authState: authState));
@@ -284,7 +284,7 @@ class _StartupResolverState extends ConsumerState<_StartupResolver> {
       // Step 4: If not logged in -> login; else -> dashboard
       _go(loggedIn ? '/dashboard' : '/login');
     } catch (e) {
-      debugPrint('Resolver error: $e');
+
       _go('/login');
     }
   }

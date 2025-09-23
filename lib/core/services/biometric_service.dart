@@ -1,79 +1,102 @@
-import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:io';
+
+enum BiometricErrorCode {
+  noAuthenticationSet,
+  notAvailable,
+  notEnrolled,
+  deviceNotSecure,
+  lockedOut,
+  cancelled,
+  timeout,
+  unknown,
+}
+
+class BiometricResult {
+  final bool success;
+  final String? errorMessage;
+  final BiometricErrorCode? errorCode;
+  final String? authMethod;
+
+  const BiometricResult({
+    required this.success,
+    this.errorMessage,
+    this.errorCode,
+    this.authMethod,
+  });
+
+  BiometricResult copyWith({
+    bool? success,
+    String? errorMessage,
+    BiometricErrorCode? errorCode,
+    String? authMethod,
+  }) {
+    return BiometricResult(
+      success: success ?? this.success,
+      errorMessage: errorMessage ?? this.errorMessage,
+      errorCode: errorCode ?? this.errorCode,
+      authMethod: authMethod ?? this.authMethod,
+    );
+  }
+}
 
 class BiometricService {
-  static final BiometricService _instance = BiometricService._internal();
-  factory BiometricService() => _instance;
-  BiometricService._internal();
+  static final LocalAuthentication _auth = LocalAuthentication();
 
-  static final LocalAuthentication _localAuth = LocalAuthentication();
+  static const _kLastAuthTime = 'last_auth_time';
+  static const _kLastActivePage = 'last_active_page';
+  static const _kLastRestartType = 'last_restart_type';
 
-  // ✅ REUSED: Existing constants
-  static const Duration _authRequiredTimeout = Duration(minutes: 2);
-  static const Duration _longBreakTimeout = Duration(minutes: 5);
-  static const String _lastActivePageKey = 'last_active_page';
-  static const String _backgroundTimeKey = 'background_timestamp';
-  static const String _lastAuthTimeKey = 'last_biometric_auth';
-
-  // ✅ REUSED: All existing authentication methods - no changes needed
+  // Device capability
   static Future<bool> isDeviceSecure() async {
     try {
-      debugPrint('🔍 Checking if device is secure...');
-
-      final bool isDeviceSupported = await _localAuth.isDeviceSupported();
-      if (!isDeviceSupported) {
-        debugPrint('❌ Device does not support authentication');
-        return false;
-      }
-
-      final bool canCheckBiometrics = await _localAuth.canCheckBiometrics;
-      debugPrint('📱 Can check biometrics: $canCheckBiometrics');
-
-      return canCheckBiometrics;
-    } catch (e) {
-      debugPrint('❌ Error checking device security: $e');
+      final isSupported = await _auth.isDeviceSupported();
+      final canCheck = await _auth.canCheckBiometrics;
+      final enrolled = await hasAnyEnrollment();
+      return isSupported && (canCheck || enrolled);
+    } on PlatformException {
+      return false;
+    } catch (_) {
       return false;
     }
   }
 
   static Future<List<BiometricType>> getAvailableBiometrics() async {
     try {
-      debugPrint('📋 Getting available biometric types...');
-      final List<BiometricType> availableBiometrics = await _localAuth.getAvailableBiometrics();
-
-      for (BiometricType type in availableBiometrics) {
-        debugPrint('✅ Available: $type');
-      }
-
-      return availableBiometrics;
-    } catch (e) {
-      debugPrint('❌ Error getting biometrics: $e');
-      return [];
+      return await _auth.getAvailableBiometrics();
+    } catch (_) {
+      return const <BiometricType>[];
     }
   }
 
+  static Future<bool> hasAnyEnrollment() async {
+    try {
+      final list = await _auth.getAvailableBiometrics();
+      return list.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Authenticate
   static Future<BiometricResult> authenticateWithSystem({
-    String reason = 'Please authenticate to access EcashBook',
+    String reason = 'Please authenticate',
   }) async {
     try {
-      debugPrint('🔐 Starting system authentication...');
-
-      final bool isSecure = await isDeviceSecure();
-      if (!isSecure) {
-        debugPrint('❌ Device is not secure - no authentication available');
-        return BiometricResult(
+      final supports = await _auth.isDeviceSupported();
+      if (!supports) {
+        return const BiometricResult(
           success: false,
-          errorMessage: 'No screen lock set up on device. Please set up PIN, Pattern, Password, or Biometric authentication in device settings.',
-          errorCode: BiometricErrorCode.noAuthenticationSet,
+          errorMessage: 'Authentication not supported on this device',
+          errorCode: BiometricErrorCode.notAvailable,
         );
       }
 
-      final bool didAuthenticate = await _localAuth.authenticate(
+      final didAuth = await _auth.authenticate(
         localizedReason: reason,
-        options: AuthenticationOptions(
+        options: const AuthenticationOptions(
           biometricOnly: false,
           stickyAuth: true,
           useErrorDialogs: true,
@@ -81,31 +104,26 @@ class BiometricService {
         ),
       );
 
-      if (didAuthenticate) {
-        debugPrint('✅ Authentication successful');
-        await _recordSuccessfulAuthentication();
-
-        final String nextPage = await getSmartNavigationDestination();
-
+      if (didAuth) {
+        await _touchLastAuthTime();
+        final hasBio = await hasAnyEnrollment();
         return BiometricResult(
           success: true,
-          authMethod: await _getUsedAuthMethod(),
-          navigationDestination: nextPage,
-        );
-      } else {
-        debugPrint('❌ Authentication failed or cancelled');
-        return BiometricResult(
-          success: false,
-          errorMessage: 'Authentication cancelled or failed',
-          errorCode: BiometricErrorCode.cancelled,
+          authMethod: hasBio ? 'biometric' : 'device_credential',
         );
       }
-
+      return const BiometricResult(
+        success: false,
+        errorMessage: 'Authentication cancelled',
+        errorCode: BiometricErrorCode.cancelled,
+      );
     } on PlatformException catch (e) {
-      debugPrint('❌ Platform exception during authentication: $e');
-      return _handlePlatformException(e);
+      return BiometricResult(
+        success: false,
+        errorMessage: e.message ?? 'Authentication failed',
+        errorCode: _mapPlatformError(e),
+      );
     } catch (e) {
-      debugPrint('❌ General error during authentication: $e');
       return BiometricResult(
         success: false,
         errorMessage: 'Authentication error: $e',
@@ -114,275 +132,125 @@ class BiometricService {
     }
   }
 
-  // ✅ ENHANCED: Smart navigation with restart type priority
-  static Future<String> getSmartNavigationDestination() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-
-      // ✅ PRIORITY 1: Check restart type first
-      final String? restartType = prefs.getString('last_restart_type');
-      final String lastActivePage = prefs.getString(_lastActivePageKey) ?? '/dashboard';
-
-      debugPrint('🧭 Smart navigation analysis:');
-      debugPrint('   - Restart type: $restartType');
-      debugPrint('   - Last active page: $lastActivePage');
-
-      // ✅ NEW: Restart type based navigation (highest priority)
-      if (restartType != null) {
-        switch (restartType) {
-          case 'screen_state':
-            debugPrint('📱 Screen state change - returning to: $lastActivePage');
-            return lastActivePage;
-
-          case 'app_background':
-            debugPrint('📱 App background - returning to: $lastActivePage');
-            return lastActivePage;
-
-          case 'ram_clear':
-            debugPrint('🧹 RAM clear - going to dashboard');
-            return '/dashboard';
-
-          case 'phone_restart':
-            debugPrint('📱 Phone restart - going to dashboard');
-            return '/dashboard';
-
-          default:
-            debugPrint('❓ Unknown restart type: $restartType');
-            break;
-        }
-      }
-
-      // ✅ FALLBACK: Use existing time-based logic
-      final String? backgroundTimeString = prefs.getString(_backgroundTimeKey);
-
-      if (backgroundTimeString == null) {
-        debugPrint('🧭 No background time found - going to dashboard');
-        return '/dashboard';
-      }
-
-      final DateTime backgroundTime = DateTime.parse(backgroundTimeString);
-      final DateTime currentTime = DateTime.now();
-      final Duration timeSinceBackground = currentTime.difference(backgroundTime);
-
-      debugPrint('⏱️ Time since background: ${timeSinceBackground.inMinutes} minutes');
-
-      if (timeSinceBackground > _longBreakTimeout) {
-        debugPrint('🧭 Long break (${timeSinceBackground.inMinutes}min) - going to dashboard');
-        return '/dashboard';
-      } else {
-        debugPrint('🧭 Quick resume (${timeSinceBackground.inMinutes}min) - returning to $lastActivePage');
-        return lastActivePage;
-      }
-    } catch (e) {
-      debugPrint('❌ Error in smart navigation: $e');
-      return '/dashboard';
-    }
-  }
-
-  // ✅ REUSED: All existing utility methods - no changes needed
-  static Future<void> saveLastActivePage(String pageName) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_lastActivePageKey, pageName);
-      debugPrint('📝 Saved last active page: $pageName');
-    } catch (e) {
-      debugPrint('⚠️ Failed to save last active page: $e');
-    }
-  }
-
-  static Future<void> saveBackgroundTime() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final String timestamp = DateTime.now().toIso8601String();
-      await prefs.setString(_backgroundTimeKey, timestamp);
-      debugPrint('📝 Saved background time: $timestamp');
-    } catch (e) {
-      debugPrint('⚠️ Failed to save background time: $e');
-    }
-  }
-
-  static Future<void> clearNavigationData() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_lastActivePageKey);
-      await prefs.remove(_backgroundTimeKey);
-      debugPrint('🧹 Navigation data cleared');
-    } catch (e) {
-      debugPrint('⚠️ Failed to clear navigation data: $e');
-    }
-  }
-
-  // ✅ REUSED: All existing error handling - no changes needed
-  static BiometricResult _handlePlatformException(PlatformException e) {
-    String errorMessage;
-    BiometricErrorCode errorCode;
-
-    switch (e.code) {
-      case 'NotAvailable':
-        errorMessage = 'Biometric authentication not available on this device';
-        errorCode = BiometricErrorCode.notAvailable;
-        break;
-      case 'NotEnrolled':
-        errorMessage = 'No biometric credentials enrolled. Please set up fingerprint or face authentication in device settings';
-        errorCode = BiometricErrorCode.notEnrolled;
-        break;
-      case 'PasscodeNotSet':
-        errorMessage = 'No screen lock set up. Please set up PIN, Pattern, or Password in device settings';
-        errorCode = BiometricErrorCode.noAuthenticationSet;
-        break;
-      case 'DeviceNotSecure':
-        errorMessage = 'Device is not secure. Please enable screen lock in device settings';
-        errorCode = BiometricErrorCode.deviceNotSecure;
-        break;
-      case 'LockedOut':
-      case 'PermanentlyLockedOut':
-        errorMessage = 'Too many failed attempts. Please try again later or use device PIN/Pattern';
-        errorCode = BiometricErrorCode.lockedOut;
-        break;
-      case 'UserCancel':
-        errorMessage = 'Authentication cancelled by user';
-        errorCode = BiometricErrorCode.cancelled;
-        break;
-      case 'Timeout':
-        errorMessage = 'Authentication timeout. Please try again';
-        errorCode = BiometricErrorCode.timeout;
-        break;
-      default:
-        errorMessage = 'Authentication failed: ${e.message ?? 'Unknown error'}';
-        errorCode = BiometricErrorCode.unknown;
-    }
-
-    return BiometricResult(
-      success: false,
-      errorMessage: errorMessage,
-      errorCode: errorCode,
-    );
-  }
-
-  static Future<String> _getUsedAuthMethod() async {
-    try {
-      final List<BiometricType> available = await getAvailableBiometrics();
-
-      if (available.contains(BiometricType.fingerprint)) {
-        return 'fingerprint';
-      } else if (available.contains(BiometricType.face)) {
-        return 'face';
-      } else if (available.contains(BiometricType.iris)) {
-        return 'iris';
-      } else {
-        return 'device_credentials';
-      }
-    } catch (e) {
-      return 'unknown';
-    }
-  }
-
-  static Future<void> _recordSuccessfulAuthentication() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final String timestamp = DateTime.now().toIso8601String();
-      await prefs.setString(_lastAuthTimeKey, timestamp);
-      debugPrint('📝 Recorded successful authentication at $timestamp');
-    } catch (e) {
-      debugPrint('⚠️ Failed to record authentication: $e');
-    }
+  // Re-auth timeout helpers
+  static Future<bool> isAuthenticationRequired({Duration? timeout}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final last = prefs.getInt(_kLastAuthTime);
+    if (last == null) return true;
+    final dt = DateTime.fromMillisecondsSinceEpoch(last);
+    final lim = timeout ?? const Duration(minutes: 2);
+    return DateTime.now().difference(dt) > lim;
   }
 
   static Future<DateTime?> getLastAuthenticationTime() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? timestamp = prefs.getString(_lastAuthTimeKey);
-
-      if (timestamp != null) {
-        return DateTime.parse(timestamp);
-      }
-      return null;
-    } catch (e) {
-      debugPrint('⚠️ Failed to get last authentication time: $e');
-      return null;
-    }
-  }
-
-  static Future<bool> isAuthenticationRequired({
-    Duration? timeout,
-  }) async {
-    try {
-      final Duration actualTimeout = timeout ?? _authRequiredTimeout;
-      final DateTime? lastAuth = await getLastAuthenticationTime();
-
-      if (lastAuth == null) {
-        debugPrint('🔐 No previous authentication - required');
-        return true;
-      }
-
-      final Duration timeSinceAuth = DateTime.now().difference(lastAuth);
-      final bool isRequired = timeSinceAuth > actualTimeout;
-
-      debugPrint('⏱️ Time since last auth: ${timeSinceAuth.inMinutes} minutes');
-      debugPrint('🔐 Authentication required: $isRequired');
-
-      return isRequired;
-    } catch (e) {
-      debugPrint('⚠️ Error checking authentication requirement: $e');
-      return true;
-    }
+    final prefs = await SharedPreferences.getInstance();
+    final last = prefs.getInt(_kLastAuthTime);
+    if (last == null) return null;
+    return DateTime.fromMillisecondsSinceEpoch(last);
   }
 
   static Future<void> clearAuthenticationData() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_lastAuthTimeKey);
-      await clearNavigationData();
-      debugPrint('🧹 Cleared biometric authentication data');
-    } catch (e) {
-      debugPrint('⚠️ Failed to clear authentication data: $e');
-    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kLastAuthTime);
   }
 
   static Future<Map<String, dynamic>> getAuthenticationInfo() async {
-    final bool isSecure = await isDeviceSecure();
-    final List<BiometricType> available = await getAvailableBiometrics();
-    final DateTime? lastAuth = await getLastAuthenticationTime();
-
+    final prefs = await SharedPreferences.getInstance();
+    final last = prefs.getInt(_kLastAuthTime);
+    final supported = await _safeIsSupported();
+    final hasBio = await _safeHasBio();
     return {
-      'device_secure': isSecure,
-      'available_biometrics': available.map((e) => e.toString()).toList(),
-      'last_authentication': lastAuth?.toIso8601String(),
-      'platform': Platform.operatingSystem,
-      'platform_version': Platform.operatingSystemVersion,
+      'supported': supported,
+      'has_biometrics': hasBio,
+      'last_auth_time': last,
     };
   }
-}
 
-// ✅ REUSED: Existing result classes - no changes needed
-class BiometricResult {
-  final bool success;
-  final String? errorMessage;
-  final BiometricErrorCode? errorCode;
-  final String? authMethod;
-  final String? navigationDestination;
+  // Navigation-related utilities used by login and biometric screens
 
-  BiometricResult({
-    required this.success,
-    this.errorMessage,
-    this.errorCode,
-    this.authMethod,
-    this.navigationDestination,
-  });
-
-  @override
-  String toString() {
-    return 'BiometricResult(success: $success, errorMessage: $errorMessage, authMethod: $authMethod, destination: $navigationDestination)';
+  static Future<void> saveLastActivePage(String route) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kLastActivePage, route);
   }
-}
 
-enum BiometricErrorCode {
-  notAvailable,
-  notEnrolled,
-  noAuthenticationSet,
-  deviceNotSecure,
-  lockedOut,
-  cancelled,
-  timeout,
-  unknown,
+  static Future<void> saveLastRestartType(String type) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kLastRestartType, type);
+  }
+
+  // Added to fix undefined method in login_page.dart
+  static Future<void> clearNavigationData() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kLastActivePage);
+    await prefs.remove(_kLastRestartType);
+  }
+
+  // Used by BiometricScreen for smart routing after unlock
+  static Future<String> getSmartNavigationDestination() async {
+    final prefs = await SharedPreferences.getInstance();
+    final restartType = prefs.getString(_kLastRestartType) ?? 'unknown';
+    final lastActive = prefs.getString(_kLastActivePage) ?? '/dashboard';
+
+    switch (restartType) {
+      case 'screen_state':
+      case 'app_background':
+        return lastActive;
+      case 'ram_clear':
+      case 'phone_restart':
+      default:
+        return '/dashboard';
+    }
+  }
+
+  // Internal helpers
+  static Future<void> _touchLastAuthTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_kLastAuthTime, DateTime.now().millisecondsSinceEpoch);
+  }
+
+  static Future<bool> _safeIsSupported() async {
+    try {
+      return await _auth.isDeviceSupported();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<bool> _safeHasBio() async {
+    try {
+      final list = await _auth.getAvailableBiometrics();
+      return list.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static BiometricErrorCode _mapPlatformError(PlatformException e) {
+    final code = e.code.toLowerCase();
+    if (code.contains('lockedout') || code.contains('lockout')) {
+      return BiometricErrorCode.lockedOut;
+    }
+    if (code.contains('notavailable') || code.contains('nosupport')) {
+      return BiometricErrorCode.notAvailable;
+    }
+    if (code.contains('notenrolled') ||
+        code.contains('noenrolled') ||
+        code.contains('passcode not set')) {
+      return BiometricErrorCode.notEnrolled;
+    }
+    if (code.contains('notsetup') ||
+        code.contains('notset') ||
+        code.contains('devicepasscodenotset')) {
+      return BiometricErrorCode.noAuthenticationSet;
+    }
+    if (code.contains('canceled') ||
+        code.contains('cancelled') ||
+        code.contains('usercancel')) {
+      return BiometricErrorCode.cancelled;
+    }
+    if (code.contains('timeout')) {
+      return BiometricErrorCode.timeout;
+    }
+    return BiometricErrorCode.unknown;
+  }
 }

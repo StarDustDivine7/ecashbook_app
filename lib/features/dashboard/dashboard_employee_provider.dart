@@ -2,7 +2,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import '../../core/models/employee_details.dart';
 import '../../core/services/auth_service.dart';
 
@@ -33,10 +32,9 @@ class DashboardEmployeeState {
 class DashboardEmployeeNotifier extends StateNotifier<DashboardEmployeeState> {
   DashboardEmployeeNotifier() : super(const DashboardEmployeeState());
 
-  Future<void> load({String? overrideDate}) async {
+  Future<void> load([String? overrideDate]) async {
     try {
       state = state.copyWith(loading: true, error: null);
-
       final prefs = await SharedPreferences.getInstance();
       final secure = await AuthService.getSecure() ?? '';
       final user = await AuthService.getSavedUser();
@@ -48,16 +46,14 @@ class DashboardEmployeeNotifier extends StateNotifier<DashboardEmployeeState> {
         todayDate: todayDate,
         secure: secure,
       );
-
       if (!resp.success) {
         state = state.copyWith(loading: false, error: resp.message);
         return;
       }
-
       await prefs.setString('last_employee_details_date', resp.data.date);
       state = state.copyWith(loading: false, details: resp.data, error: null);
     } catch (e) {
-      debugPrint('❌ Employee details load error: $e');
+      debugPrint('Employee details load error: $e');
       state = state.copyWith(loading: false, error: 'Failed to load employee details');
     }
   }

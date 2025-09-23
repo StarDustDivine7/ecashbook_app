@@ -9,15 +9,15 @@ class LoginResponse {
     required this.data,
   });
 
-  factory LoginResponse.fromJson(Map<String, dynamic> json) {
+  factory LoginResponse.fromJson(Map json) {
     return LoginResponse(
       success: json['success'] == true,
       message: (json['message'] ?? '').toString(),
-      data: LoginData.fromJson(json['data'] as Map<String, dynamic>),
+      data: LoginData.fromJson(json['data'] as Map),
     );
   }
 
-  Map<String, dynamic> toJson() => {
+  Map toJson() => {
     'success': success,
     'message': message,
     'data': data.toJson(),
@@ -37,16 +37,16 @@ class LoginData {
     required this.secure,
   });
 
-  factory LoginData.fromJson(Map<String, dynamic> json) {
+  factory LoginData.fromJson(Map json) {
     return LoginData(
-      user: User.fromJson(json['user'] as Map<String, dynamic>),
+      user: User.fromJson(json['user'] as Map),
       token: (json['token'] ?? '').toString(),
       tokenType: (json['token_type'] ?? '').toString(),
       secure: (json['secure'] ?? '').toString(),
     );
   }
 
-  Map<String, dynamic> toJson() => {
+  Map toJson() => {
     'user': user.toJson(),
     'token': token,
     'token_type': tokenType,
@@ -75,7 +75,7 @@ class User {
     required this.updatedAt,
   });
 
-  factory User.fromJson(Map<String, dynamic> json) {
+  factory User.fromJson(Map json) {
     return User(
       id: (json['id'] ?? 0) as int,
       addedBy: (json['added_by'] ?? 0) as int,
@@ -88,7 +88,7 @@ class User {
     );
   }
 
-  Map<String, dynamic> toJson() => {
+  Map toJson() => {
     'id': id,
     'added_by': addedBy,
     'employeeId': employeeId,
