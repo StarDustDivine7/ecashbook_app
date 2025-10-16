@@ -75,7 +75,7 @@ class AppConstants {
   static const String refreshTokenKey = 'refresh_token';
   static const String userDataKey = 'user_data';
   static const String isFirstTimeKey = 'is_first_time';
-  static const String biometricEnabledKey = 'biometric_enabled';
+
   static const String locationPermissionKey = 'location_permission';
   static const String lastCheckInKey = 'last_check_in';
 
@@ -88,9 +88,9 @@ class AppConstants {
   static const double locationAccuracyThreshold = 100.0; // meters
   static const int locationTimeoutSeconds = 30;
 
-  // Biometric Settings
-  static const String biometricReason = 'Please authenticate to access EcashBook';
-  static const int maxBiometricAttempts = 3;
+  // PIN Settings
+  static const String pinReason = 'Please enter your PIN to access EcashBook';
+  static const int maxPinAttempts = 5;
 
   // UI Constants
   static const double defaultPadding = 16.0;
@@ -234,8 +234,8 @@ class ErrorMessages {
   static const String unauthorized = 'Session expired. Please login again';
   static const String invalidCredentials = 'Invalid email or password';
   static const String locationPermissionDenied = 'Location permission is required for attendance';
-  static const String biometricNotAvailable = 'Biometric authentication not available';
-  static const String biometricFailed = 'Biometric authentication failed';
+  static const String pinNotSet = 'PIN not set. Please set up your PIN';
+  static const String pinFailed = 'Incorrect PIN. Please try again';
   static const String fileUploadFailed = 'Failed to upload file';
   static const String invalidFileFormat = 'Invalid file format';
   static const String fileTooLarge = 'File size exceeds limit';
@@ -258,7 +258,7 @@ class SuccessMessages {
 // Info Messages
 class InfoMessages {
   static const String locationDetecting = 'Detecting your location...';
-  static const String biometricPrompt = 'Please authenticate using your fingerprint or face';
+  static const String pinPrompt = 'Please enter your 4-digit PIN';
   static const String dataLoading = 'Loading data...';
   static const String syncingData = 'Syncing with server...';
   static const String noInternetConnection = 'Working in offline mode';

@@ -23,10 +23,8 @@ class DashboardAuthService {
       final now = DateTime.now();
 
       if (lastReset != today && now.hour >= 1) {
-        debugPrint('🔄 Resetting data for new day: $today');
         await prefs.remove(_punchDataKey);
         await prefs.setString(_lastResetKey, today);
-        debugPrint('✅ Reset completed');
       }
     } catch (e) {
       debugPrint('❌ Reset error: ${e.toString()}');
@@ -53,7 +51,6 @@ class DashboardAuthService {
       final prefs = await SharedPreferences.getInstance();
       final json = jsonEncode(data.toJson());
       await prefs.setString(_punchDataKey, json);
-      debugPrint('💾 Data saved successfully');
     } catch (e) {
       debugPrint('❌ Save error: ${e.toString()}');
     }
@@ -205,24 +202,19 @@ class EnhancedDashboardNotifier extends StateNotifier<PunchData> {
 
     if (!state.isPunchedIn) {
       if (state.punchInTime != null) {
-        debugPrint('❌ Already punched in today');
         return;
       }
-      debugPrint('✅ Punching in at ${now.toIso8601String()}');
       _addActivity('Punched In');
       state = state.copyWith(punchInTime: now, isPunchedIn: true, canPunchOut: true);
     } else {
       if (state.punchOutTime != null) {
-        debugPrint('❌ Already punched out today');
         return;
       }
       if (state.punchInTime == null) {
-        debugPrint('❌ Cannot punch out without punching in');
         return;
       }
       if (state.isOnBreak) await _endCurrentBreak();
       if (state.isOnTiffin) await _endCurrentTiffin();
-      debugPrint('✅ Punching out at ${now.toIso8601String()}');
       _addActivity('Punched Out');
       state = state.copyWith(punchOutTime: now, isPunchedIn: false, canPunchOut: false);
     }
@@ -231,11 +223,9 @@ class EnhancedDashboardNotifier extends StateNotifier<PunchData> {
 
   Future<void> toggleBreak() async {
     if (!state.isPunchedIn || state.punchOutTime != null) {
-      debugPrint('❌ Cannot take break - not punched in or already punched out');
       return;
     }
     if (state.isOnTiffin && !state.isOnBreak) {
-      debugPrint('❌ Cannot start break - tiffin is already active');
       return;
     }
     if (!state.isOnBreak) {
@@ -248,7 +238,6 @@ class EnhancedDashboardNotifier extends StateNotifier<PunchData> {
 
   Future<void> _startBreak() async {
     final now = DateTime.now();
-    debugPrint('☕ Starting break at ${now.toIso8601String()}');
     _addActivity('Break Started');
     state = state.copyWith(currentBreakStartTime: now, isOnBreak: true);
   }
@@ -257,7 +246,6 @@ class EnhancedDashboardNotifier extends StateNotifier<PunchData> {
     if (state.currentBreakStartTime == null) return;
     final now = DateTime.now();
     final duration = now.difference(state.currentBreakStartTime!);
-    debugPrint('✅ Ending break - Duration: ${duration.inMinutes} minutes');
     _addActivity('Break Ended', details: '${duration.inMinutes} minutes');
     state = state.copyWith(
       totalBreakTime: state.totalBreakTime + duration,
@@ -268,11 +256,9 @@ class EnhancedDashboardNotifier extends StateNotifier<PunchData> {
 
   Future<void> toggleTiffin() async {
     if (!state.isPunchedIn || state.punchOutTime != null) {
-      debugPrint('❌ Cannot take tiffin - not punched in or already punched out');
       return;
     }
     if (state.isOnBreak && !state.isOnTiffin) {
-      debugPrint('❌ Cannot start tiffin - break is already active');
       return;
     }
     if (!state.isOnTiffin) {
@@ -285,7 +271,6 @@ class EnhancedDashboardNotifier extends StateNotifier<PunchData> {
 
   Future<void> _startTiffin() async {
     final now = DateTime.now();
-    debugPrint('🍽️ Starting tiffin at ${now.toIso8601String()}');
     _addActivity('Tiffin Started');
     state = state.copyWith(currentTiffinStartTime: now, isOnTiffin: true);
   }
@@ -294,7 +279,6 @@ class EnhancedDashboardNotifier extends StateNotifier<PunchData> {
     if (state.currentTiffinStartTime == null) return;
     final now = DateTime.now();
     final duration = now.difference(state.currentTiffinStartTime!);
-    debugPrint('✅ Ending tiffin - Duration: ${duration.inMinutes} minutes');
     _addActivity('Tiffin Ended', details: '${duration.inMinutes} minutes');
     state = state.copyWith(
       totalTiffinTime: state.totalTiffinTime + duration,

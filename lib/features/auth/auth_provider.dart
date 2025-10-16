@@ -232,11 +232,20 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> logout() async {
     try {
-      debugPrint('🚪 Starting manual logout process...');
-      await AuthService.clearAuthSession();
-      await _clearLoginState();
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('is_first_time', false);
+      debugPrint('🚪 Starting logout process with API call...');
+      
+      // Call logout API
+      final logoutResult = await AuthService.logoutWithAPI();
+      
+      if (logoutResult.isUnauthorized) {
+        debugPrint('🔒 Unauthorized token - data already cleared');
+      } else if (logoutResult.success) {
+        debugPrint('✅ Logout API successful');
+      } else {
+        debugPrint('⚠️ Logout API failed but data cleared: ${logoutResult.message}');
+      }
+      
+      // Update state
       if (mounted) {
         state = state.copyWith(
           isLoggedIn: false,
@@ -247,11 +256,22 @@ class AuthNotifier extends StateNotifier<AuthState> {
           rememberedPassword: state.rememberedPassword,
         );
       }
-      debugPrint('✅ Manual logout successful - will redirect to login page');
+      
+      debugPrint('✅ Logout process completed - will redirect to login page');
     } catch (e) {
       debugPrint('❌ Logout error: $e');
+      // Even if there's an error, ensure user is logged out locally
+      try {
+        await AuthService.clearAllAppData();
+      } catch (_) {}
+      
       if (mounted) {
-        state = state.copyWith(isLoggedIn: false, isFirstTime: false, currentLocation: null, errorMessage: null);
+        state = state.copyWith(
+          isLoggedIn: false, 
+          isFirstTime: false, 
+          currentLocation: null, 
+          errorMessage: null
+        );
       }
     }
   }

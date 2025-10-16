@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../auth/auth_provider.dart';
-import '../auth/biometric_provider.dart';
-import '../../core/services/biometric_service.dart';
+import '../security/pin_provider.dart';
 
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
@@ -19,7 +19,6 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
   final _password = TextEditingController();
   bool _rememberMe = false;
   bool _obscurePassword = true;
-  bool _isBiometricAvailable = false;
   bool _isLoggingIn = false;
 
   late AnimationController _animationController;
@@ -30,7 +29,6 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
   void initState() {
     super.initState();
     _initAnimations();
-    _checkBiometricAvailability();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadRememberedCredentials();
     });
@@ -50,19 +48,7 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
     _animationController.forward();
   }
 
-  Future<void> _checkBiometricAvailability() async {
-    try {
-      final isAvailable = await BiometricService.isDeviceSecure();
-      if (mounted) {
-        setState(() {
-          _isBiometricAvailable = isAvailable;
-        });
-      }
-      debugPrint('🔐 Biometric available for login: $isAvailable');
-    } catch (e) {
-      debugPrint('❌ Error checking biometric availability: $e');
-    }
-  }
+
 
   void _loadRememberedCredentials() {
     final authState = ref.read(authProvider);
@@ -133,10 +119,14 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
 
       if (success) {
         debugPrint('✅ Login successful - preparing navigation');
-        ref.read(biometricProvider.notifier).clearAuthenticationRequired();
-        debugPrint('🧹 Biometric requirement cleared after login');
-        await BiometricService.saveLastActivePage('/dashboard');
-        await BiometricService.clearNavigationData();
+        
+        // Mark as having logged in at least once
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('has_ever_logged_in', true);
+        await prefs.setBool('is_first_time', false);
+        
+        ref.read(pinProvider.notifier).clearPinRequired();
+        debugPrint('🧹 PIN requirement cleared after login');
         await Future.delayed(const Duration(milliseconds: 300));
         if (mounted) {
           Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (route) => false);
@@ -173,76 +163,7 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
     }
   }
 
-  // Optional biometric-assisted login retains same flow; requires remembered creds
-  Future<void> _handleBiometricLogin() async {
-    if (_isLoggingIn) {
-      debugPrint('🔐 Login already in progress - ignoring biometric request');
-      return;
-    }
 
-    setState(() {
-      _isLoggingIn = true;
-    });
-
-    try {
-      debugPrint('🔐 Attempting biometric login...');
-      final result = await BiometricService.authenticateWithSystem(
-        reason: 'Use biometric authentication to login to EcashBook',
-      );
-
-      if (result.success) {
-        debugPrint('✅ Biometric authentication successful - proceeding with login');
-        final authState = ref.read(authProvider);
-        if (authState.rememberedEmail != null && authState.rememberedPassword != null) {
-          final authNotifier = ref.read(authProvider.notifier);
-          final loginSuccess = await authNotifier.login(
-            authState.rememberedEmail!,
-            authState.rememberedPassword!,
-            true,
-          );
-          if (loginSuccess) {
-            debugPrint('✅ Biometric login successful - preparing navigation');
-            ref.read(biometricProvider.notifier).clearAuthenticationRequired();
-            debugPrint('🧹 Biometric requirement cleared after biometric login');
-            await BiometricService.saveLastActivePage('/dashboard');
-            await BiometricService.clearNavigationData();
-            await Future.delayed(const Duration(milliseconds: 300));
-            if (mounted) {
-              Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (route) => false);
-            }
-          }
-        } else {
-          debugPrint('❌ No remembered credentials available for biometric login');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Please login with username/password first to enable biometric login.'),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-        }
-      } else {
-        debugPrint('❌ Biometric authentication failed: ${result.errorMessage}');
-        if (result.errorMessage != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result.errorMessage!),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Biometric login exception: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoggingIn = false;
-        });
-      }
-    }
-  }
 
   void _showForgotPasswordModal() {
     showDialog(
@@ -545,46 +466,7 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
                                 ),
                               ),
                             ),
-                            // Biometric login
-                            if (_isBiometricAvailable &&
-                                authState.rememberedEmail != null &&
-                                authState.rememberedPassword != null) ...[
-                              const SizedBox(height: 16),
-                              Row(
-                                children: [
-                                  Expanded(child: Divider(color: Colors.grey)),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                                    child: Text('OR',
-                                        style: TextStyle(color: Colors.grey, fontSize: 14, fontWeight: FontWeight.w500)),
-                                  ),
-                                  Expanded(child: Divider(color: Colors.grey)),
-                                ],
-                              ),
-                              const SizedBox(height: 16),
-                              SizedBox(
-                                width: double.infinity,
-                                height: 56,
-                                child: OutlinedButton(
-                                  style: OutlinedButton.styleFrom(
-                                    side: const BorderSide(color: Color(0xFF422F90), width: 2),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                                  ),
-                                  onPressed: (_isLoggingIn || authState.isLoading) ? null : _handleBiometricLogin,
-                                  child: const Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.fingerprint, color: Color(0xFF422F90), size: 24),
-                                      SizedBox(width: 12),
-                                      Text(
-                                        'Login with Biometric',
-                                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Color(0xFF422F90)),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
+
                             const SizedBox(height: 40),
                           ],
                         ),

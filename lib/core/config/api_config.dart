@@ -3,6 +3,7 @@ class ApiConfig {
   static const String baseUrl = "https://testapp.ecashbook.in/api";
 
   static const String login = "$baseUrl/login";
+  static const String logout = "$baseUrl/auth/logout";
   static const String employeeDetails = "$baseUrl/users/employee/details";
   static const String punchIn = "$baseUrl/users/employee/punch-in";
   static const String lunchIn = "$baseUrl/users/employee/lunch-in";
@@ -14,4 +15,6 @@ class ApiConfig {
   static const String taskDetails = "$baseUrl/users/task/task-details";
   static const String taskStatusUpdate = "$baseUrl/users/task/task-status-update";
   static const String companyHolidays = "$baseUrl/users/company/holidays";
+  static const String attendanceSummary = "$baseUrl/users/attendance/range-summary";
+  static const String attendanceDailyActivity = "$baseUrl/users/attendance/daily-activity";
 }

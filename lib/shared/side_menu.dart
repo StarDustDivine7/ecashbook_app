@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../features/auth/auth_provider.dart';
+import '../features/dashboard/dashboard_employee_provider.dart';
+import '../core/utils/logout_handler.dart';
 import 'main_layout.dart';
 
 class SideMenu extends ConsumerWidget {
@@ -10,6 +12,16 @@ class SideMenu extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Watch employee data from dashboard provider
+    final employeeState = ref.watch(dashboardEmployeeProvider);
+    final employeeDetails = employeeState.details;
+    
+    // Fetch employee data if not loaded or refresh if needed
+    if (employeeDetails == null && !employeeState.loading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(dashboardEmployeeProvider.notifier).load();
+      });
+    }
     return Drawer(
       width: MediaQuery.of(context).size.width * 0.85, // Responsive width
       child: Container(
@@ -76,28 +88,70 @@ class SideMenu extends ConsumerWidget {
                           ],
                         ),
                         child: ClipOval(
-                          child: Image.asset(
-                            'assets/images/avatar-dummy.jpg',
-                            width: 55,
-                            height: 55,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) {
-                              // Fallback if image doesn't exist
-                              return Container(
+                          child: employeeState.loading
+                            ? Container(
                                 width: 55,
                                 height: 55,
                                 decoration: const BoxDecoration(
                                   color: Colors.white,
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(
-                                  Icons.person,
-                                  color: Color(0xFF422F90),
-                                  size: 30,
+                                child: const CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF422F90)),
                                 ),
-                              );
-                            },
-                          ),
+                              )
+                            : employeeDetails?.profileImg != null && employeeDetails!.profileImg!.isNotEmpty
+                              ? Image.network(
+                                  employeeDetails.profileImg!,
+                                  width: 55,
+                                  height: 55,
+                                  fit: BoxFit.cover,
+                                  loadingBuilder: (context, child, loadingProgress) {
+                                    if (loadingProgress == null) return child;
+                                    return Container(
+                                      width: 55,
+                                      height: 55,
+                                      decoration: const BoxDecoration(
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF422F90)),
+                                      ),
+                                    );
+                                  },
+                                  errorBuilder: (context, error, stackTrace) {
+                                    // Fallback if network image fails
+                                    return Container(
+                                      width: 55,
+                                      height: 55,
+                                      decoration: const BoxDecoration(
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: const Icon(
+                                        Icons.person,
+                                        color: Color(0xFF422F90),
+                                        size: 30,
+                                      ),
+                                    );
+                                  },
+                                )
+                              : Container(
+                                  width: 55,
+                                  height: 55,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.person,
+                                    color: Color(0xFF422F90),
+                                    size: 30,
+                                  ),
+                                ),
                         ),
                       ),
 
@@ -109,10 +163,14 @@ class SideMenu extends ConsumerWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            // Name - Reduced font size
-                            const Text(
-                              'Admin User',
-                              style: TextStyle(
+                            // Name - Dynamic from API
+                            Text(
+                              employeeState.loading 
+                                ? 'Loading...' 
+                                : (employeeDetails?.name.isNotEmpty == true 
+                                    ? employeeDetails!.name 
+                                    : 'Employee'),
+                              style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 16, // Reduced from 18
                                 fontWeight: FontWeight.bold,
@@ -121,9 +179,13 @@ class SideMenu extends ConsumerWidget {
                             ),
                             const SizedBox(height: 4),
 
-                            // Job Role - Reduced font size
+                            // Job Role - Dynamic from API
                             Text(
-                              'System Administrator',
+                              employeeState.loading 
+                                ? 'Loading...' 
+                                : (employeeDetails?.designationName.isNotEmpty == true 
+                                    ? '${employeeDetails!.designationName} • ${employeeDetails.employeeId}' 
+                                    : 'Employee'),
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.9),
                                 fontSize: 12, // Reduced from 13
@@ -133,9 +195,13 @@ class SideMenu extends ConsumerWidget {
                             ),
                             const SizedBox(height: 2),
 
-                            // Email - Reduced font size
+                            // Email - Dynamic from API
                             Text(
-                              'admin@admin.com',
+                              employeeState.loading 
+                                ? 'Loading...' 
+                                : (employeeDetails?.email.isNotEmpty == true 
+                                    ? employeeDetails!.email 
+                                    : 'No email'),
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.8),
                                 fontSize: 10, // Reduced from 11
@@ -550,35 +616,9 @@ class SideMenu extends ConsumerWidget {
               ),
               onPressed: () async {
                 Navigator.pop(context); // Close dialog immediately
-
-                // ✅ NO LOADING SCREEN - Direct logout
-                try {
-                  debugPrint('🚪 Direct logout - no loading screen');
-
-                  // Clear preferences
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setBool('is_first_time', false);
-                  await prefs.setBool('user_logged_in', false);
-
-                  // Call auth logout
-                  await ref.read(authProvider.notifier).logout();
-
-                  if (context.mounted) {
-                    // ✅ FORCE: Direct navigation to login
-                    Navigator.pushNamedAndRemoveUntil(
-                      context,
-                      '/login',
-                          (route) => false,
-                    );
-                    debugPrint('✅ Direct navigation completed');
-                  }
-
-                } catch (e) {
-                  debugPrint('❌ Error: $e');
-                  if (context.mounted) {
-                    Navigator.pushReplacementNamed(context, '/login');
-                  }
-                }
+                
+                // Use the new logout handler
+                await LogoutHandler.performLogout(context, ref);
               },
               child: const Text(
                 'Logout',

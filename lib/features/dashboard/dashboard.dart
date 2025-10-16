@@ -2,12 +2,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
-import '../attendance/attendance.dart';
-import '../leave/apply_leave.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dashboard_auth.dart';
 import 'dashboard_employee_provider.dart';
 import '../../core/models/employee_details.dart';
+import '../../core/models/daily_activity_model.dart';
 import '../../core/services/auth_service.dart';
+import '../../core/services/attendance_service.dart';
+import '../onboarding/welcome_modal.dart';
 
 class Dashboard extends ConsumerStatefulWidget {
   const Dashboard({super.key});
@@ -23,6 +25,18 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
   bool _isCheckingLocation = false;
   bool _isInsideOffice = false;
   String? _geoError;
+
+  // Daily activity data
+  DailyActivityData? _todayActivity;
+  bool _loadingTodayActivity = false;
+
+  // Punch action loading states
+  bool _isPunchingIn = false;
+  bool _isPunchingOut = false;
+  bool _isLunchIn = false;
+  bool _isLunchOut = false;
+  bool _isBreakIn = false;
+  bool _isBreakOut = false;
 
   static const Color _primaryPurple = Color(0xFF6366F1);
   static const Color _primaryDark = Color(0xFF4338CA);
@@ -46,6 +60,8 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await ref.read(dashboardEmployeeProvider.notifier).load();
       _evaluateGeofenceOnceIfNeeded();
+      _fetchTodayActivity();
+      _checkFirstTimePermissions();
     });
   }
 
@@ -185,10 +201,92 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
   Future _refreshAll() async {
     await ref.read(dashboardEmployeeProvider.notifier).load();
     await _evaluateGeofenceOnceIfNeeded();
+    await _fetchTodayActivity();
   }
 
-  // Punch In (unchanged behavior)
+  Future<void> _checkFirstTimePermissions() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final shouldShowPermissions = prefs.getBool('show_permissions_after_dashboard') ?? false;
+      
+      if (shouldShowPermissions) {
+        // Clear the flag
+        await prefs.remove('show_permissions_after_dashboard');
+        
+        // Show permissions dialog after a short delay
+        await Future.delayed(const Duration(milliseconds: 1000));
+        if (mounted) {
+          _showPermissionsDialog();
+        }
+      }
+    } catch (e) {
+      // Silent error handling
+    }
+  }
+
+  void _showPermissionsDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const WelcomeModal(),
+    );
+  }
+
+  Future<void> _fetchTodayActivity() async {
+    if (!mounted) return;
+    
+    setState(() {
+      _loadingTodayActivity = true;
+    });
+
+    try {
+      final user = await AuthService.getSavedUser();
+      if (user == null || user.employeeId.isEmpty) {
+        return;
+      }
+      
+      final secure = await AuthService.getSecure();
+      if (secure == null || secure.isEmpty) {
+        return;
+      }
+
+      final dailyActivity = await AttendanceService.fetchDailyActivity(
+        empId: user.employeeId,
+        date: DateTime.now(),
+        secure: secure,
+      );
+
+      if (!mounted) return;
+
+      if (dailyActivity != null && dailyActivity.success) {
+        setState(() {
+          _todayActivity = dailyActivity.data;
+        });
+      } else {
+        setState(() {
+          _todayActivity = null;
+        });
+      }
+
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _todayActivity = null;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingTodayActivity = false;
+        });
+      }
+    }
+  }
+
+  // Punch In with loading state
   Future _handlePunchInTap(EmployeeDetailsData? details) async {
+    if (_isPunchingIn) return; // Prevent multiple taps
+    
     try {
       if (details == null) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
@@ -216,6 +314,11 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
         return;
       }
 
+      // Set loading state
+      setState(() {
+        _isPunchingIn = true;
+      });
+
       double lat = 0, lng = 0;
       try {
         final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best);
@@ -223,6 +326,9 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
         lng = pos.longitude;
       } catch (_) {
         if (requiresOfficePresence) {
+          setState(() {
+            _isPunchingIn = false;
+          });
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Location required for WFO')));
           return;
         }
@@ -241,14 +347,22 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
         punchInLong: lng,
         workLocationStatus: workLocationStatus,
       );
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
         await ref.read(dashboardEmployeeProvider.notifier).load();
         await _evaluateGeofenceOnceIfNeeded();
+        await _fetchTodayActivity();
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Punch in failed')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPunchingIn = false;
+        });
       }
     }
   }
@@ -325,13 +439,20 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
     return confirmed == true;
   }
 
-  // Punch Out handler (same behavior but made safe - retained your geofence checks)
+  // Punch Out handler with loading state
   Future _handlePunchOutTap(EmployeeDetailsData? details) async {
+    if (_isPunchingOut) return; // Prevent multiple taps
+    
     try {
       if (details == null) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
         return;
       }
+
+      // Set loading state
+      setState(() {
+        _isPunchingOut = true;
+      });
 
       // Only when already punched in
       final todayWorkingStatus = (details.todayWorkingStatus ?? 'not_present').toLowerCase();
@@ -454,6 +575,7 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Complete Today Work')));
           // Reload to get todayWorkingStatus
           await ref.read(dashboardEmployeeProvider.notifier).load();
+          await _fetchTodayActivity();
           setState(() {}); // ensure rebuild
         } else {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message.isNotEmpty ? res.message : 'Punch out failed')));
@@ -461,16 +583,29 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Punch out failed')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isPunchingOut = false;
+        });
+      }
     }
   }
 
   // Lunch In/Out and Break handlers
   Future _handleLunchInTap(EmployeeDetailsData? details) async {
+    if (_isLunchIn) return; // Prevent multiple taps
+    
     try {
       if (details == null) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
         return;
       }
+      
+      setState(() {
+        _isLunchIn = true;
+      });
+      
       final user = await AuthService.getSavedUser();
       final empId = user?.employeeId ?? '';
       final secure = await AuthService.getSecure() ?? '';
@@ -490,19 +625,32 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
         await ref.read(dashboardEmployeeProvider.notifier).load();
-        setState(() {});
+        await _fetchTodayActivity();
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lunch in failed')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLunchIn = false;
+        });
+      }
     }
   }
 
   Future _handleLunchOutTap(EmployeeDetailsData? details) async {
+    if (_isLunchOut) return; // Prevent multiple taps
+    
     try {
       if (details == null) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
         return;
       }
+      
+      setState(() {
+        _isLunchOut = true;
+      });
+      
       final user = await AuthService.getSavedUser();
       final empId = user?.employeeId ?? '';
       final secure = await AuthService.getSecure() ?? '';
@@ -522,19 +670,32 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
         await ref.read(dashboardEmployeeProvider.notifier).load();
-        setState(() {});
+        await _fetchTodayActivity();
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Lunch out failed')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLunchOut = false;
+        });
+      }
     }
   }
 
   Future _handleBreakInTap(EmployeeDetailsData? details) async {
+    if (_isBreakIn) return; // Prevent multiple taps
+    
     try {
       if (details == null) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
         return;
       }
+      
+      setState(() {
+        _isBreakIn = true;
+      });
+      
       final user = await AuthService.getSavedUser();
       final empId = user?.employeeId ?? '';
       final secure = await AuthService.getSecure() ?? '';
@@ -554,19 +715,32 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
         await ref.read(dashboardEmployeeProvider.notifier).load();
-        setState(() {});
+        await _fetchTodayActivity();
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Break in failed')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBreakIn = false;
+        });
+      }
     }
   }
 
   Future _handleBreakOutTap(EmployeeDetailsData? details) async {
+    if (_isBreakOut) return; // Prevent multiple taps
+    
     try {
       if (details == null) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Employee info not loaded')));
         return;
       }
+      
+      setState(() {
+        _isBreakOut = true;
+      });
+      
       final user = await AuthService.getSavedUser();
       final empId = user?.employeeId ?? '';
       final secure = await AuthService.getSecure() ?? '';
@@ -586,15 +760,46 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(res.message)));
         await ref.read(dashboardEmployeeProvider.notifier).load();
-        setState(() {});
+        await _fetchTodayActivity();
       }
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Break out failed')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBreakOut = false;
+        });
+      }
     }
   }
 
 
-  String _formatDuration(Duration d) => '${d.inHours}h ${d.inMinutes % 60}m';
+
+
+  String _formatApiTime(String? timeString) {
+    if (timeString == null || timeString.isEmpty || timeString == 'null') {
+      return '0h 0m';
+    }
+    
+    // Handle different time formats from API
+    if (timeString.contains(':')) {
+      // Format like "02:30" or "02:30:00"
+      final parts = timeString.split(':');
+      if (parts.length >= 2) {
+        final hours = int.tryParse(parts[0]) ?? 0;
+        final minutes = int.tryParse(parts[1]) ?? 0;
+        return '${hours}h ${minutes}m';
+      }
+    }
+    
+    // If it's already in the right format or unknown format, return as is
+    if (timeString.contains('h') && timeString.contains('m')) {
+      return timeString;
+    }
+    
+    // Default fallback
+    return timeString.isNotEmpty ? timeString : '0h 0m';
+  }
 
   String _getCurrentTime() {
     final now = DateTime.now();
@@ -719,7 +924,53 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
                     borderRadius: BorderRadius.circular(18),
                     border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 2),
                     boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(0, 2))]),
-                child: const Icon(Icons.person, color: Colors.white, size: 36),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: loading
+                    ? Container(
+                        width: 60,
+                        height: 60,
+                        color: Colors.white.withValues(alpha: 0.1),
+                        child: const CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : details?.profileImg != null && details!.profileImg!.isNotEmpty
+                      ? Image.network(
+                          details.profileImg!,
+                          width: 60,
+                          height: 60,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return Container(
+                              width: 60,
+                              height: 60,
+                              color: Colors.white.withValues(alpha: 0.1),
+                              child: const CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) {
+                            // Fallback if network image fails
+                            return Container(
+                              width: 60,
+                              height: 60,
+                              color: Colors.white.withValues(alpha: 0.1),
+                              child: const Icon(Icons.person, color: Colors.white, size: 36),
+                            );
+                          },
+                        )
+                      : Container(
+                          width: 60,
+                          height: 60,
+                          color: Colors.white.withValues(alpha: 0.1),
+                          child: const Icon(Icons.person, color: Colors.white, size: 36),
+                        ),
+                ),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -864,7 +1115,7 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
               child: Material(
                 color: Colors.transparent,
                 child: InkWell(
-                  onTap: _isCheckingLocation
+                  onTap: (_isCheckingLocation || _isPunchingIn || _isPunchingOut)
                       ? null
                       : () async {
                     _punchController.forward().then((_) => _punchController.reverse());
@@ -891,14 +1142,31 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(
-                        isPunchedIn ? Icons.logout_rounded : (canPunchIn ? Icons.login_rounded : Icons.directions_run_rounded),
-                        size: 36,
-                        color: Colors.white,
-                      ),
+                      // Show loading indicator when punching
+                      if (_isPunchingIn || _isPunchingOut)
+                        const SizedBox(
+                          width: 36,
+                          height: 36,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 3,
+                          ),
+                        )
+                      else
+                        Icon(
+                          isPunchedIn ? Icons.logout_rounded : (canPunchIn ? Icons.login_rounded : Icons.directions_run_rounded),
+                          size: 36,
+                          color: Colors.white,
+                        ),
                       const SizedBox(height: 8),
                       Text(
-                        isPunchedIn ? 'Punch Out' : (canPunchIn ? 'Punch In' : 'On the Way'),
+                        _isPunchingIn 
+                            ? 'Punching In...'
+                            : _isPunchingOut
+                                ? 'Punching Out...'
+                                : isPunchedIn 
+                                    ? 'Punch Out' 
+                                    : (canPunchIn ? 'Punch In' : 'On the Way'),
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
@@ -913,7 +1181,15 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Text(
-                          _isCheckingLocation ? 'CHECKING...' : isPunchedIn ? 'TAP TO START' : (canPunchIn ? 'Tap To Start' : 'Going To Office'),
+                          _isCheckingLocation 
+                              ? 'CHECKING...' 
+                              : _isPunchingIn 
+                                  ? 'PROCESSING...'
+                                  : _isPunchingOut
+                                      ? 'PROCESSING...'
+                                      : isPunchedIn 
+                                          ? 'TAP TO END' 
+                                          : (canPunchIn ? 'Tap To Start' : 'Going To Office'),
                           style: const TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.w800,
@@ -968,7 +1244,9 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
                     } else if (canStartBreakOrLunch) {
                       await _handleBreakInTap(details);
                     }
-                  })),
+                  },
+                  isLoading: _isBreakIn || _isBreakOut,
+              )),
           const SizedBox(width: 12),
           Expanded(
               child: _buildActionCard(
@@ -983,14 +1261,16 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
                     } else if (canStartBreakOrLunch) {
                       await _handleLunchInTap(details);
                     }
-                  })),
+                  },
+                  isLoading: _isLunchIn || _isLunchOut,
+              )),
         ]),
         const SizedBox(height: 12),
-        Row(children: [
-          Expanded(child: _buildActionCard('Apply Leave', Icons.event_busy_rounded, _errorRed, false, true, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ApplyLeavePage())))),
-          const SizedBox(width: 12),
-          Expanded(child: _buildActionCard('View Reports', Icons.analytics_rounded, _accentGreen, false, true, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AttendancePage())))),
-        ]),
+        // Row(children: [
+        //   Expanded(child: _buildActionCard('Apply Leave', Icons.event_busy_rounded, _errorRed, false, true, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ApplyLeavePage())))),
+        //   const SizedBox(width: 12),
+        //   Expanded(child: _buildActionCard('View Reports', Icons.analytics_rounded, _accentGreen, false, true, () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AttendancePage())))),
+        // ]),
         if (!isPunchedIn) ...[
           const SizedBox(height: 12),
           Container(
@@ -1004,23 +1284,53 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
     );
   }
 
-  Widget _buildActionCard(String title, IconData icon, Color color, bool isActive, bool isEnabled, VoidCallback onTap) {
+  Widget _buildActionCard(String title, IconData icon, Color color, bool isActive, bool isEnabled, VoidCallback onTap, {bool isLoading = false}) {
     return Container(
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(18), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 15, offset: const Offset(0, 5))]),
       child: Material(
         color: isActive ? color : isEnabled ? _cardWhite : Colors.grey.shade100,
         borderRadius: BorderRadius.circular(18),
         child: InkWell(
-          onTap: isEnabled ? onTap : null,
+          onTap: (isEnabled && !isLoading) ? onTap : null,
           borderRadius: BorderRadius.circular(18),
           child: Container(
             padding: const EdgeInsets.all(20),
             child: Column(children: [
-              Container(width: 50, height: 50, decoration: BoxDecoration(color: isActive ? Colors.white.withValues(alpha: 0.25) : isEnabled ? color.withValues(alpha: 0.12) : Colors.grey.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14)), child: Icon(icon, color: isActive ? Colors.white : isEnabled ? color : Colors.grey, size: 26)),
+              Container(
+                width: 50, 
+                height: 50, 
+                decoration: BoxDecoration(
+                  color: isActive ? Colors.white.withValues(alpha: 0.25) : isEnabled ? color.withValues(alpha: 0.12) : Colors.grey.withValues(alpha: 0.12), 
+                  borderRadius: BorderRadius.circular(14)
+                ), 
+                child: isLoading 
+                    ? SizedBox(
+                        width: 26,
+                        height: 26,
+                        child: CircularProgressIndicator(
+                          color: isActive ? Colors.white : color,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : Icon(icon, color: isActive ? Colors.white : isEnabled ? color : Colors.grey, size: 26)
+              ),
               const SizedBox(height: 16),
-              Text(title, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: isActive ? Colors.white : isEnabled ? _textDark : Colors.grey), textAlign: TextAlign.center),
+              Text(
+                isLoading ? 'Processing...' : title, 
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: isActive ? Colors.white : isEnabled ? _textDark : Colors.grey), 
+                textAlign: TextAlign.center
+              ),
               const SizedBox(height: 4),
-              Text(isActive ? 'ACTIVE' : isEnabled ? 'TAP TO START' : 'UNAVAILABLE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: isActive ? Colors.white.withValues(alpha: 0.7) : isEnabled ? _textLight : Colors.grey, letterSpacing: 0.5)),
+              Text(
+                isLoading 
+                    ? 'PLEASE WAIT' 
+                    : isActive 
+                        ? 'ACTIVE' 
+                        : isEnabled 
+                            ? 'TAP TO START' 
+                            : 'UNAVAILABLE', 
+                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: isActive ? Colors.white.withValues(alpha: 0.7) : isEnabled ? _textLight : Colors.grey, letterSpacing: 0.5)
+              ),
             ]),
           ),
         ),
@@ -1029,31 +1339,255 @@ class _DashboardState extends ConsumerState<Dashboard> with TickerProviderStateM
   }
 
   Widget _buildTodayMetrics(Duration tiffin, Duration breaks, PunchData data) {
-    final work = DashboardAuthService.calculateWorkingHours(data);
+    if (_loadingTodayActivity) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 20),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: _cardWhite, 
+          borderRadius: BorderRadius.circular(20), 
+          border: Border.all(color: _borderColor), 
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 15, offset: const Offset(0, 5))]
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start, 
+          children: [
+            const Text('Today\'s Overview', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: _textDark)),
+            const SizedBox(height: 20),
+            const Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(_primaryPurple),
+              ),
+            ),
+            const SizedBox(height: 20),
+          ]
+        ),
+      );
+    }
+
+    if (_todayActivity == null) {
+      return Container(
+        margin: const EdgeInsets.symmetric(horizontal: 20),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: _cardWhite, 
+          borderRadius: BorderRadius.circular(20), 
+          border: Border.all(color: _borderColor), 
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 15, offset: const Offset(0, 5))]
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start, 
+          children: [
+            const Text('Today\'s Overview', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: _textDark)),
+            const SizedBox(height: 20),
+            const Center(
+              child: Column(
+                children: [
+                  Icon(Icons.info_outline_rounded, size: 40, color: _textLight),
+                  SizedBox(height: 12),
+                  Text('No activity data available for today', style: TextStyle(color: _textLight)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+          ]
+        ),
+      );
+    }
+
+    final activity = _todayActivity!;
+    
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 20),
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(color: _cardWhite, borderRadius: BorderRadius.circular(20), border: Border.all(color: _borderColor), boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 15, offset: const Offset(0, 5))]),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Today\'s Overview', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: _textDark)),
-        const SizedBox(height: 20),
-        _buildMetricRow('Total Work Time', _formatDuration(work), Icons.timer_rounded, _primaryPurple),
-        const SizedBox(height: 16),
-        _buildMetricRow('Break Duration', _formatDuration(breaks), Icons.coffee_rounded, _accentBlue),
-        const SizedBox(height: 16),
-        _buildMetricRow('Tiffin Duration', _formatDuration(tiffin), Icons.restaurant_rounded, _accentOrange),
-      ]),
+      decoration: BoxDecoration(
+        color: _cardWhite, 
+        borderRadius: BorderRadius.circular(20), 
+        border: Border.all(color: _borderColor), 
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 15, offset: const Offset(0, 5))]
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start, 
+        children: [
+          // Header with date and status
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Today\'s Overview', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: _textDark)),
+                    Text(activity.date, style: const TextStyle(fontSize: 12, color: _textLight)),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: _getStatusColor(activity.status).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: _getStatusColor(activity.status),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      activity.status.toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: _getStatusColor(activity.status),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          
+          // Timing Information
+          _buildTodayInfoRow('Check In', activity.inTime ?? 'Not checked in', Icons.login_rounded, _accentGreen),
+          const SizedBox(height: 12),
+          _buildTodayInfoRow('Check Out', activity.outTime ?? 'Not checked out', Icons.logout_rounded, _errorRed),
+          const SizedBox(height: 12),
+          _buildTodayInfoRow('Working Hours', _formatApiTime(activity.workingHours), Icons.timer_rounded, _primaryPurple),
+          
+          if (activity.isLate && activity.lateBy != null) ...[
+            const SizedBox(height: 12),
+            _buildTodayInfoRow('Late By', activity.lateBy!, Icons.warning_rounded, _errorRed),
+          ],
+          
+          const SizedBox(height: 16),
+          const Divider(color: _borderColor),
+          const SizedBox(height: 16),
+          
+          // Break and Lunch Information
+          _buildTodayInfoRow('Break Duration', _formatApiTime(activity.breaks.totalBreakTime), Icons.coffee_rounded, _accentBlue),
+          const SizedBox(height: 12),
+          _buildTodayInfoRow('Lunch Duration', _formatApiTime(activity.totalLunchTime), Icons.restaurant_rounded, _accentOrange),
+          
+          if (activity.lunchStatus.isNotEmpty && activity.lunchStatus != 'not_started') ...[
+            const SizedBox(height: 12),
+            _buildTodayInfoRow('Lunch Status', activity.lunchStatus.toUpperCase(), Icons.info_rounded, _accentOrange),
+          ],
+          
+          const SizedBox(height: 16),
+          const Divider(color: _borderColor),
+          const SizedBox(height: 16),
+          
+          // Office Information
+          Row(
+            children: [
+              Expanded(
+                child: _buildTodayInfoCard('Office Hours', '${activity.openingTime} - ${activity.closingTime}', Icons.business_rounded, _textLight),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildTodayInfoCard('Work Location', activity.workLocationStatus, Icons.location_on_rounded, _primaryPurple),
+              ),
+            ],
+          ),
+        ]
+      ),
     );
   }
 
-  Widget _buildMetricRow(String title, String value, IconData icon, Color color) {
-    return Row(children: [
-      Container(width: 44, height: 44, decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(12)), child: Icon(icon, color: color, size: 22)),
-      const SizedBox(width: 16),
-      Expanded(child: Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: _textDark))),
-      Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: color)),
-    ]);
+  Widget _buildTodayInfoRow(String label, String value, IconData icon, Color color) {
+    return Row(
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, color: color, size: 18),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: _textDark,
+            ),
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: color,
+          ),
+        ),
+      ],
+    );
   }
+
+  Widget _buildTodayInfoCard(String label, String value, IconData icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(height: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: color,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: _textDark,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'present':
+        return _accentGreen;
+      case 'absent':
+        return _errorRed;
+      case 'leave':
+        return _accentOrange;
+      case 'holiday':
+        return _accentBlue;
+      default:
+        return _textLight;
+    }
+  }
+
+
 
   Widget _buildTodayTasks() => const SizedBox.shrink();
   Widget _buildRecentActivity(List activities) => const SizedBox.shrink();

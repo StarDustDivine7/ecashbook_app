@@ -1,12 +1,12 @@
-// lib/features/attendance/attendance.dart
 import 'package:flutter/material.dart';
 import 'package:table_calendar/table_calendar.dart';
-import 'package:intl/intl.dart'; // For date formatting if needed for holidays
+import 'package:intl/intl.dart';
 
-// Assuming your models and services are correctly pathed
 import '../../core/models/holiday_model.dart';
+import '../../core/models/daily_activity_model.dart';
 import '../../core/services/auth_service.dart';
-import '../../core/network/api_client.dart'; // To make the API call
+import '../../core/services/attendance_service.dart';
+import '../../core/network/api_client.dart';
 
 class AttendancePage extends StatefulWidget {
   const AttendancePage({super.key});
@@ -15,13 +15,12 @@ class AttendancePage extends StatefulWidget {
   State<AttendancePage> createState() => _AttendancePageState();
 }
 
-class _AttendancePageState extends State<AttendancePage>
-    with TickerProviderStateMixin {
-  DateTime _selectedDay = DateTime.now();
-  DateTime _focusedDay = DateTime.now();
+class _AttendancePageState extends State<AttendancePage> with TickerProviderStateMixin {
+  late DateTime _selectedDay;
+  late DateTime _focusedDay;
   late AnimationController _slideController;
 
-  // Premium Design Colors
+  // Colors based on your existing page design
   static const Color _primaryPurple = Color(0xFF6366F1);
   static const Color _primaryDark = Color(0xFF4338CA);
   static const Color _surfaceColor = Color(0xFFF8FAFC);
@@ -32,74 +31,50 @@ class _AttendancePageState extends State<AttendancePage>
   static const Color _textDark = Color(0xFF0F172A);
   static const Color _textLight = Color(0xFF64748B);
   static const Color _borderColor = Color(0xFFE2E8F0);
+  static const Color _accentBlue = Color(0xFF3B82F6);
 
-  // REMOVED: Mock holiday data as we will fetch from API
-  // final List<Map<String, String>> _holidays = [ ... ];
+  // Map of Date to attendance status string from API
+  Map<DateTime, String> _attendanceStatus = {};
+  
 
-  // Mock attendance data - replace with real data from your backend
-  final Map<DateTime, Map<String, dynamic>> _attendanceData = {
-    DateTime(2025, 8, 21): {
-      'inTime': '09:15 AM',
-      'outTime': '06:00 PM',
-      'workingHours': '8h 45m',
-      'breakTime': '1h 15m',
-      'tiffinTime': '30m',
-      'tasks': [
-        'Reviewed dashboard UI designs',
-        'Fixed payslip PDF generation',
-        'Updated authentication system',
-        'Code review for mobile app'
-      ],
-      'logs': [
-        'Checked in at 09:15 AM',
-        'Started work session',
-        'Break started at 11:30 AM',
-        'Break ended at 11:45 AM',
-        'Tiffin break at 01:00 PM',
-        'Tiffin ended at 01:30 PM',
-        'Checked out at 06:00 PM'
-      ],
-      'status': 'present'
-    },
-    DateTime(2025, 8, 20): {
-      'inTime': '09:30 AM',
-      'outTime': '05:45 PM',
-      'workingHours': '8h 15m',
-      'breakTime': '45m',
-      'tiffinTime': '25m',
-      'tasks': [
-        'Team meeting attendance',
-        'Project planning session',
-        'Database optimization'
-      ],
-      'logs': [
-        'Checked in at 09:30 AM',
-        'Team meeting at 10:00 AM',
-        'Break at 03:00 PM',
-        'Checked out at 05:45 PM'
-      ],
-      'status': 'present'
-    },
-    DateTime(2025, 8, 19): {
-      'inTime': '--:--',
-      'outTime': '--:--',
-      'workingHours': '0h 0m',
-      'breakTime': '0m',
-      'tiffinTime': '0m',
-      'tasks': [],
-      'logs': ['Leave taken - Personal work'],
-      'status': 'leave'
-    },
-  };
+  
+  // Summary data from API
+  Map<String, int> _attendanceSummary = {};
+
+  // Daily activity data from API
+  DailyActivityData? _selectedDayActivity;
+  bool _loadingDailyActivity = false;
+
+  bool _loadingAttendance = true;
 
   @override
   void initState() {
     super.initState();
+    
+    // Initialize dates properly - normalize to date only (no time)
+    final now = DateTime.now();
+    _selectedDay = DateTime(now.year, now.month, now.day);
+    _focusedDay = DateTime(now.year, now.month, now.day);
+    
     _slideController = AnimationController(
       duration: const Duration(milliseconds: 400),
       vsync: this,
     );
     _slideController.forward();
+    _fetchAttendanceFromApi();
+    
+    // Fetch today's activity since today's date is selected by default
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchDailyActivity(_selectedDay);
+      // Force a rebuild to ensure the calendar shows the correct selection
+      if (mounted) {
+        setState(() {
+          // Ensure _selectedDay is properly set to today
+          final now = DateTime.now();
+          _selectedDay = DateTime(now.year, now.month, now.day);
+        });
+      }
+    });
   }
 
   @override
@@ -108,113 +83,536 @@ class _AttendancePageState extends State<AttendancePage>
     super.dispose();
   }
 
-  // Method to show the holiday list modal
+  Future<void> _fetchAttendanceFromApi() async {
+    setState(() { _loadingAttendance = true; });
+    try {
+      final user = await AuthService.getSavedUser();
+      if (user?.employeeId == null) return;
+      final secure = await AuthService.getSecure();
+      if (secure == null) return;
+
+      final result = await AttendanceService.fetchMonthlyAttendance(
+        empId: user!.employeeId,
+        month: _focusedDay,
+        secure: secure,
+      );
+      
+      setState(() { 
+        _attendanceStatus = result['statusMap'] as Map<DateTime, String>;
+        _attendanceSummary = result['summary'] as Map<String, int>;
+      });
+    } catch (e) {
+      if (mounted) {
+        _showErrorSnackbar('Failed to load attendance data: ${e.toString()}');
+      }
+    } finally {
+      setState(() { _loadingAttendance = false; });
+    }
+  }
+
   Future<void> _showHolidayModal() async {
-    // Show a loading indicator immediately
+    if (!mounted) return;
     showDialog(
       context: context,
-      barrierDismissible: false, // User cannot dismiss while loading
-      builder: (BuildContext context) {
-        return const Center(child: CircularProgressIndicator());
-      },
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(_primaryPurple),
+        ),
+      ),
     );
 
     try {
       final user = await AuthService.getSavedUser();
+      if (user == null || user.employeeId.isEmpty) {
+        if (mounted) {
+          Navigator.pop(context);
+          _showErrorSnackbar('Please login again to continue');
+        }
+        return;
+      }
       final secure = await AuthService.getSecure();
-
-      if (user == null || secure == null || user.employeeId.isEmpty) {
-        if (mounted) Navigator.pop(context); // Dismiss loading
-        _showErrorSnackbar('Could not load user details for holidays.');
+      if (secure == null || secure.isEmpty) {
+        if (mounted) {
+          Navigator.pop(context);
+          _showErrorSnackbar('Session expired. Please login again');
+        }
         return;
       }
 
-      final String currentYear = DateTime.now().year.toString();
-      final List<dynamic> holidayData = await ApiClient.fetchCompanyHolidays(
+      final holidayData = await ApiClient.fetchCompanyHolidays(
         empId: user.employeeId,
-        year: currentYear, // Fetching for the current year
+        year: DateTime.now().year.toString(),
         secure: secure,
       );
 
-      if (mounted) Navigator.pop(context); // Dismiss loading dialog
+      if (!mounted) return;
+      Navigator.pop(context);
 
-      final List<Holiday> holidays = holidayData
-          .map((data) => Holiday.fromJson(data as Map<String, dynamic>))
-          .toList();
-
-      if (holidays.isEmpty) {
-        _showInfoSnackbar('No holidays found for the current year.');
+      if (holidayData.isEmpty) {
+        _showInfoSnackbar('No holidays found for this year');
         return;
       }
 
-      // Show the actual holiday list dialog
-      showDialog(
+      final holidays = holidayData
+          .map<Holiday>((e) => Holiday.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
+
+      showModalBottomSheet(
         context: context,
-        builder: (BuildContext context) {
-          return AlertDialog(
-            title: const Text('Company Holidays'),
-            content: SizedBox(
-              width: double.maxFinite,
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: holidays.length,
-                itemBuilder: (BuildContext context, int index) {
-                  final holiday = holidays[index];
-                  // Assuming holidayDate is in 'YYYY-MM-DD' format, parse and reformat
-                  String formattedDate = holiday.holidayDate;
-                  try {
-                    final date = DateFormat('yyyy-MM-dd').parse(holiday.holidayDate);
-                    formattedDate = DateFormat('dd MMM yyyy').format(date); // Example: 25 Dec 2025
-                  } catch (e) {
-                    // If parsing fails, use the original date string
-                    print("Error parsing holiday date: ${holiday.holidayDate}, $e");
-                  }
-                  return Card(
-                    margin: const EdgeInsets.symmetric(vertical: 4.0),
-                    child: ListTile(
-                      title: Text(holiday.holidayName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text('${holiday.holidayType}\n${holiday.holidayDescription}'),
-                      trailing: Text(formattedDate, style: const TextStyle(fontSize: 12, color: _textLight)),
-                      isThreeLine: holiday.holidayDescription.isNotEmpty,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        builder: (context) {
+          return Container(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: _accentOrange.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.event_note_rounded,
+                          color: _accentOrange, size: 20),
                     ),
-                  );
-                },
-              ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Holiday Calendar ${DateTime.now().year}",
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: _textDark,
+                            ),
+                          ),
+                          const Text(
+                            "National holidays and festivals",
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: _textLight,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _accentOrange.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        "${holidays.length} Days",
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _accentOrange,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 500,
+                  child: ListView.builder(
+                    itemCount: holidays.length,
+                    itemBuilder: (context, index) {
+                      final holiday = holidays[index];
+                      final date = DateFormat("dd MMM yyyy")
+                          .format(DateFormat("yyyy-MM-dd").parse(holiday.holidayDate));
+
+                      final isNational = holiday.holidayType
+                          .toLowerCase()
+                          .contains("national");
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: _cardWhite,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: _borderColor),
+                        ),
+                        child: ListTile(
+                          leading: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: isNational
+                                  ? _errorRed.withOpacity(0.15)
+                                  : _accentOrange.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              isNational
+                                  ? Icons.flag_rounded
+                                  : Icons.celebration_rounded,
+                              color: isNational ? _errorRed : _accentOrange,
+                            ),
+                          ),
+                          title: Text(
+                            holiday.holidayName,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: _textDark,
+                            ),
+                          ),
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: isNational
+                                        ? _errorRed.withOpacity(0.15)
+                                        : _accentOrange.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    holiday.holidayType,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: isNational ? _errorRed : _accentOrange,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  date,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: _textLight,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
             ),
-            actions: <Widget>[
-              TextButton(
-                child: const Text('Close'),
-                onPressed: () {
-                  Navigator.of(context).pop();
-                },
-              ),
-            ],
           );
         },
       );
     } catch (e) {
-      if (mounted) Navigator.pop(context); // Dismiss loading if it's still shown
-      print('Error fetching holidays: $e');
-      _showErrorSnackbar('Failed to fetch holidays. Please try again.');
+      if (!mounted) return;
+      Navigator.pop(context);
+      _showErrorSnackbar("Failed to fetch holidays: ${e.toString()}");
     }
   }
 
-  void _showErrorSnackbar(String message) {
+  void _showErrorSnackbar(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: _errorRed,
+      SnackBar(content: Text(msg), backgroundColor: Colors.red),
+    );
+  }
+
+  void _showInfoSnackbar(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), backgroundColor: Colors.blue),
+    );
+  }
+
+  void _handleDaySelection(DateTime selectedDay, DateTime focusedDay) {
+    // Normalize dates to date only (no time components)
+    final normalizedSelectedDay = DateTime(selectedDay.year, selectedDay.month, selectedDay.day);
+    final normalizedFocusedDay = DateTime(focusedDay.year, focusedDay.month, focusedDay.day);
+    
+    // Always fetch daily activity, even if it's the same date
+    _fetchDailyActivity(normalizedSelectedDay);
+    
+    setState(() {
+      _selectedDay = normalizedSelectedDay;
+      _focusedDay = normalizedFocusedDay;
+    });
+    _slideController.reset();
+    _slideController.forward();
+  }
+
+  Future<void> _fetchDailyActivity(DateTime selectedDate) async {
+    if (!mounted) return;
+    
+    setState(() {
+      _loadingDailyActivity = true;
+      _selectedDayActivity = null;
+    });
+
+    try {
+      final user = await AuthService.getSavedUser();
+      if (user == null || user.employeeId.isEmpty) {
+        if (mounted) {
+          _showErrorSnackbar('Please login again to continue');
+        }
+        return;
+      }
+      
+      final secure = await AuthService.getSecure();
+      if (secure == null || secure.isEmpty) {
+        if (mounted) {
+          _showErrorSnackbar('Session expired. Please login again');
+        }
+        return;
+      }
+
+      final dailyActivity = await AttendanceService.fetchDailyActivity(
+        empId: user.employeeId,
+        date: selectedDate,
+        secure: secure,
+      );
+
+      if (!mounted) return;
+
+      if (dailyActivity != null && dailyActivity.success) {
+        setState(() {
+          _selectedDayActivity = dailyActivity.data;
+        });
+      } else {
+        setState(() {
+          _selectedDayActivity = null;
+        });
+        _showInfoSnackbar(dailyActivity?.message ?? 'No activity data found for this date');
+      }
+
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _selectedDayActivity = null;
+      });
+      _showErrorSnackbar("Failed to fetch daily activity: ${e.toString()}");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingDailyActivity = false;
+        });
+      }
+    }
+  }
+
+
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'present':
+        return _accentGreen;
+      case 'absent':
+        return _errorRed;
+      case 'leave':
+        return _accentOrange;
+      case 'holiday':
+        return _accentBlue;
+      default:
+        return _textLight;
+    }
+  }
+
+  IconData _getStatusIcon(String status) {
+    switch (status.toLowerCase()) {
+      case 'present':
+        return Icons.check_circle_rounded;
+      case 'absent':
+        return Icons.cancel_rounded;
+      case 'leave':
+        return Icons.event_busy_rounded;
+      case 'holiday':
+        return Icons.celebration_rounded;
+      default:
+        return Icons.info_rounded;
+    }
+  }
+
+  Widget _buildHolidayButton() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _showHolidayModal,
+          icon: const Icon(Icons.event_available_rounded, size: 20),
+          label: const Text(
+            'Show Holiday List',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _accentOrange,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            elevation: 2,
+          ),
+        ),
       ),
     );
   }
 
-  void _showInfoSnackbar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: _accentBlue, // Assuming you have an _accentBlue or use Colors.blue
+  Widget _buildAttendanceSummaryCard() {
+    if (_attendanceSummary.isEmpty) return const SizedBox.shrink();
+    
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      decoration: BoxDecoration(
+        color: _cardWhite,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [_primaryPurple, _primaryDark],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.analytics_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Monthly Summary',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: _textDark,
+                      ),
+                    ),
+                    Text(
+                      _getMonthYear(_focusedDay),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: _textLight,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSummaryItem(
+                    'Present',
+                    _attendanceSummary['totalPresent']?.toString() ?? '0',
+                    _accentGreen,
+                    Icons.check_circle_rounded,
+                  ),
+                ),
+                Expanded(
+                  child: _buildSummaryItem(
+                    'Absent',
+                    _attendanceSummary['totalAbsent']?.toString() ?? '0',
+                    _errorRed,
+                    Icons.cancel_rounded,
+                  ),
+                ),
+                Expanded(
+                  child: _buildSummaryItem(
+                    'Leave',
+                    _attendanceSummary['totalLeave']?.toString() ?? '0',
+                    _accentOrange,
+                    Icons.event_busy_rounded,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildSummaryItem(
+                    'Holiday',
+                    _attendanceSummary['totalHoliday']?.toString() ?? '0',
+                    _accentBlue,
+                    Icons.celebration_rounded,
+                  ),
+                ),
+                Expanded(
+                  child: _buildSummaryItem(
+                    'Office Off',
+                    _attendanceSummary['totalOfficeOff']?.toString() ?? '0',
+                    Colors.black54,
+                    Icons.business_rounded,
+                  ),
+                ),
+                const Expanded(child: SizedBox()), // Empty space for alignment
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSummaryItem(String label, String count, Color color, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(height: 4),
+          Text(
+            count,
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w500,
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -224,12 +622,15 @@ class _AttendancePageState extends State<AttendancePage>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _surfaceColor,
-      body: CustomScrollView(
+      body: _loadingAttendance
+          ? const Center(child: CircularProgressIndicator())
+          : CustomScrollView(
         slivers: [
           SliverToBoxAdapter(
             child: Column(
               children: [
                 _buildHolidayButton(),
+                _buildAttendanceSummaryCard(),
                 _buildCalendarCard(),
               ],
             ),
@@ -254,37 +655,7 @@ class _AttendancePageState extends State<AttendancePage>
     );
   }
 
-  Widget _buildHolidayButton() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-      child: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton.icon(
-          onPressed: _showHolidayModal, // This now calls the API and shows the modal
-          icon: const Icon(Icons.event_available_rounded, size: 20),
-          label: const Text(
-            'Show Holiday List',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _accentOrange,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            elevation: 2,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildCalendarCard() {
-    // ... (rest of your calendar card code - unchanged)
     return Container(
       margin: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -293,7 +664,7 @@ class _AttendancePageState extends State<AttendancePage>
         border: Border.all(color: _borderColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08), // Fixed Colors.black.withValues
+            color: Colors.black.withOpacity(0.08),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -301,12 +672,14 @@ class _AttendancePageState extends State<AttendancePage>
       ),
       child: Column(
         children: [
-          // Calendar Header
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [_primaryPurple.withOpacity(0.1), _primaryDark.withOpacity(0.05)], // Fixed withValues
+                colors: [
+                  _primaryPurple.withOpacity(0.1),
+                  _primaryDark.withOpacity(0.05)
+                ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -359,11 +732,11 @@ class _AttendancePageState extends State<AttendancePage>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: _accentGreen.withOpacity(0.1), // Fixed withValues
+                    color: _accentGreen.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    '${_getPresentDays()}/${DateTime.now().day}',
+                    '${_getPresentDays()}P',
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -375,77 +748,244 @@ class _AttendancePageState extends State<AttendancePage>
             ),
           ),
 
-          // Calendar Widget
           Padding(
             padding: const EdgeInsets.all(16),
-            child: TableCalendar<Map<String, dynamic>>(
-              firstDay: DateTime(DateTime.now().year, 1, 1),
-              lastDay: DateTime.now(), // Consider if you want to allow future dates
+            child: TableCalendar<String>(
+              firstDay: DateTime(_focusedDay.year, 1, 1),
+              lastDay: DateTime(_focusedDay.year, 12, 31),
               focusedDay: _focusedDay,
-              availableGestures: AvailableGestures.none,
-              selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+              selectedDayPredicate: (day) => isSameDay(day, _selectedDay), // Enable proper selection
+              enabledDayPredicate: (day) => !day.isAfter(DateTime.now()),
               eventLoader: (day) {
-                final data = _attendanceData[DateTime(day.year, day.month, day.day)];
-                return data != null ? [data] : [];
+                final status = _attendanceStatus[DateTime(day.year, day.month, day.day)];
+                return status == null ? [] : [status];
               },
+              //-------- Full date number colored-------
+              calendarBuilders: CalendarBuilders(
+                defaultBuilder: (context, date, _) {
+                  final status = _attendanceStatus[DateTime(date.year, date.month, date.day)];
+                  final isDisabled = date.isAfter(DateTime.now());
+                  final isToday = isSameDay(date, DateTime.now());
+                  final isSelected = isSameDay(date, _selectedDay);
+                  
+                  // Determine base color from attendance status
+                  Color numberColor;
+                  if (status == null) {
+                    numberColor = _textDark;
+                  } else {
+                    switch (status) {
+                      case 'present': numberColor = _accentGreen; break;
+                      case 'absent': numberColor = _errorRed; break;
+                      case 'leave': numberColor = _accentOrange; break;
+                      case 'office off': numberColor = Colors.black; break;
+                      case 'holiday': numberColor = _accentBlue; break;
+                      default: numberColor = Colors.grey;
+                    }
+                  }
+
+                  // Determine decoration and text color based on state
+                  BoxDecoration decoration;
+                  Color textColor;
+                  
+                  if (isSelected) {
+                    // Selected date - use purple gradient (this includes today if selected)
+                    decoration = BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [_primaryPurple, _primaryDark],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    );
+                    textColor = Colors.white;
+                  } else if (isToday) {
+                    // Today's date (not selected) - use orange border
+                    decoration = BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _accentOrange, width: 2),
+                    );
+                    textColor = _accentOrange;
+                  } else {
+                    // Regular date - transparent background with status color
+                    decoration = BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                    );
+                    textColor = numberColor;
+                  }
+
+                  return GestureDetector(
+                    onTap: isDisabled ? null : () {
+                      _handleDaySelection(date, _focusedDay);
+                    },
+                    child: Container(
+                      decoration: decoration,
+                      child: Center(
+                        child: Text(
+                          '${date.day}',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: textColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                
+                // Add selected day builder to ensure proper selection highlighting
+                selectedBuilder: (context, date, _) {
+                  final status = _attendanceStatus[DateTime(date.year, date.month, date.day)];
+                  
+                  return Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [_primaryPurple, _primaryDark],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '${date.day}',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+                
+                // Add today builder to ensure today is highlighted when not selected
+                todayBuilder: (context, date, _) {
+                  final status = _attendanceStatus[DateTime(date.year, date.month, date.day)];
+                  final isSelected = isSameDay(date, _selectedDay);
+                  
+                  // If today is selected, let selectedBuilder handle it
+                  if (isSelected) return null;
+                  
+                  // Determine base color from attendance status
+                  Color numberColor;
+                  if (status == null) {
+                    numberColor = _accentOrange;
+                  } else {
+                    switch (status) {
+                      case 'present': numberColor = _accentGreen; break;
+                      case 'absent': numberColor = _errorRed; break;
+                      case 'leave': numberColor = _accentOrange; break;
+                      case 'office off': numberColor = Colors.black; break;
+                      case 'holiday': numberColor = _accentBlue; break;
+                      default: numberColor = _accentOrange;
+                    }
+                  }
+                  
+                  return Container(
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _accentOrange, width: 2),
+                    ),
+                    child: Center(
+                      child: Text(
+                        '${date.day}',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: _accentOrange,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+
+
+              //----- Small colored dot below the date number ----
+              // calendarBuilders: CalendarBuilders(
+              //   defaultBuilder: (context, date, _) {
+              //     final status = _attendanceStatus[DateTime(date.year, date.month, date.day)];
+              //     if (status == null) return null;
+              //
+              //     Color dotColor;
+              //     switch (status) {
+              //       case 'present': dotColor = _accentGreen; break;
+              //       case 'absent': dotColor = _errorRed; break;
+              //       case 'leave': dotColor = _accentOrange; break;
+              //       case 'office off': dotColor = Colors.black; break;
+              //       case 'holiday': dotColor = _accentBlue; break;
+              //       default: dotColor = Colors.grey;
+              //     }
+              //
+              //     return Column(
+              //       mainAxisAlignment: MainAxisAlignment.center,
+              //       children: [
+              //         Text(
+              //           '${date.day}',
+              //           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: _textDark),
+              //         ),
+              //         const SizedBox(height: 2),
+              //         Container(
+              //           width: 6,
+              //           height: 6,
+              //           decoration: BoxDecoration(
+              //             color: dotColor,
+              //             shape: BoxShape.circle,
+              //           ),
+              //         ),
+              //       ],
+              //     );
+              //   },
+              // ),
+
               onDaySelected: (selectedDay, focusedDay) {
                 if (selectedDay.isAfter(DateTime.now())) return;
-                setState(() {
-                  _selectedDay = selectedDay;
-                  _focusedDay = focusedDay;
-                });
-                _slideController.reset();
-                _slideController.forward();
+                _handleDaySelection(selectedDay, focusedDay);
+              },
+              onDayLongPressed: (selectedDay, focusedDay) {
+                if (selectedDay.isAfter(DateTime.now())) return;
+                _handleDaySelection(selectedDay, focusedDay);
               },
               onPageChanged: (focusedDay) {
                 setState(() {
                   _focusedDay = focusedDay;
                 });
+                _fetchAttendanceFromApi();
               },
               calendarStyle: CalendarStyle(
                 outsideDaysVisible: false,
                 weekendTextStyle: const TextStyle(color: _textDark),
                 holidayTextStyle: const TextStyle(color: _errorRed),
-                selectedDecoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [_primaryPurple, _primaryDark],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                selectedTextStyle: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w700,
-                ),
-                todayDecoration: BoxDecoration(
-                  color: _accentOrange.withOpacity(0.8), // Fixed withValues
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                todayTextStyle: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                ),
+                // Disable built-in decorations since we use custom builder
+                selectedDecoration: const BoxDecoration(),
+                selectedTextStyle: const TextStyle(),
+                todayDecoration: const BoxDecoration(),
+                todayTextStyle: const TextStyle(),
                 defaultDecoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
                 ),
                 disabledTextStyle: TextStyle(
-                  color: _textLight.withOpacity(0.5), // Fixed withValues
+                  color: const Color(0xFF64748B).withOpacity(0.5),
                 ),
                 markerDecoration: BoxDecoration(
-                  color: _accentGreen,
+                  color: Colors.transparent,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 markerSize: 6,
                 markersMaxCount: 1,
               ),
+
               headerStyle: HeaderStyle(
                 formatButtonVisible: false,
                 titleCentered: true,
                 leftChevronIcon: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: _primaryPurple.withOpacity(0.1), // Fixed withValues
+                    color: _primaryPurple.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(
@@ -457,7 +997,7 @@ class _AttendancePageState extends State<AttendancePage>
                 rightChevronIcon: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: _primaryPurple.withOpacity(0.1), // Fixed withValues
+                    color: _primaryPurple.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Icon(
@@ -472,17 +1012,11 @@ class _AttendancePageState extends State<AttendancePage>
                   color: _textDark,
                 ),
               ),
-              daysOfWeekStyle: DaysOfWeekStyle( // Assuming DaysOfWeekStyle was intended
-                weekdayStyle: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: _textLight,
-                ),
-                weekendStyle: const TextStyle( // Added missing weekendStyle for consistency
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: _textLight, // Or a different color if you prefer for weekends
-                ),
+              daysOfWeekStyle: const DaysOfWeekStyle(
+                weekdayStyle: TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
+                weekendStyle: TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
               ),
             ),
           ),
@@ -491,21 +1025,20 @@ class _AttendancePageState extends State<AttendancePage>
     );
   }
 
-  // Helper method to format month and year
   String _getMonthYear(DateTime date) {
     return DateFormat('MMMM yyyy').format(date);
   }
 
-  // Helper method to get present days (example, adjust as per your logic)
   int _getPresentDays() {
-    return _attendanceData.values.where((d) => d['status'] == 'present').length;
+    return _attendanceSummary['totalPresent'] ?? 0;
   }
 
-  // Widget to display day details
   Widget _buildDayDetailsCard() {
-    final data = _attendanceData[DateTime(_selectedDay.year, _selectedDay.month, _selectedDay.day)];
-
-    if (data == null) {
+    // Check if the selected day is in the future
+    final isToday = isSameDay(_selectedDay, DateTime.now());
+    final isFuture = _selectedDay.isAfter(DateTime.now());
+    
+    if (isFuture) {
       return Container(
         padding: const EdgeInsets.all(20),
         margin: const EdgeInsets.all(20),
@@ -515,7 +1048,80 @@ class _AttendancePageState extends State<AttendancePage>
           border: Border.all(color: _borderColor),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.08), // Fixed withValues
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.schedule_rounded, size: 40, color: _textLight),
+              const SizedBox(height: 12),
+              Text(
+                'Future date selected',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 14, color: _textLight),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Select a past or current date to view attendance details.',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 12, color: _textLight.withOpacity(0.7)),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_loadingDailyActivity) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        margin: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: _cardWhite,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _borderColor),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 20,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(_primaryPurple),
+              ),
+              SizedBox(height: 12),
+              Text(
+                'Loading daily activity...',
+                style: TextStyle(fontSize: 14, color: _textLight),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_selectedDayActivity == null) {
+      return Container(
+        padding: const EdgeInsets.all(20),
+        margin: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: _cardWhite,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _borderColor),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
               blurRadius: 20,
               offset: const Offset(0, 8),
             ),
@@ -528,7 +1134,9 @@ class _AttendancePageState extends State<AttendancePage>
               Icon(Icons.info_outline_rounded, size: 40, color: _textLight),
               const SizedBox(height: 12),
               Text(
-                'No attendance data for ${DateFormat('dd MMM yyyy').format(_selectedDay)}.',
+                isToday 
+                  ? 'No attendance data for today yet.'
+                  : 'No attendance data for ${DateFormat('dd MMM yyyy').format(_selectedDay)}.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 14, color: _textLight),
               ),
@@ -538,16 +1146,18 @@ class _AttendancePageState extends State<AttendancePage>
       );
     }
 
+    final data = _selectedDayActivity!;
+    
     return Container(
       padding: const EdgeInsets.all(20),
-      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10), // Reduced vertical margin
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       decoration: BoxDecoration(
         color: _cardWhite,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: _borderColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08), // Fixed withValues
+            color: Colors.black.withOpacity(0.08),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -555,84 +1165,135 @@ class _AttendancePageState extends State<AttendancePage>
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min, // Important for SliverFillRemaining
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // Header for selected day
+          // Header
           Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: _primaryPurple.withOpacity(0.1), // Fixed
+                  color: _getStatusColor(data.status).withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Icon(Icons.calendar_today_rounded, size: 18, color: _primaryPurple),
+                child: Icon(
+                  _getStatusIcon(data.status), 
+                  size: 18, 
+                  color: _getStatusColor(data.status)
+                ),
               ),
               const SizedBox(width: 10),
-              Text(
-                'Details for ${DateFormat('dd MMM yyyy').format(_selectedDay)}',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _textDark),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Details for ${DateFormat('dd MMM yyyy').format(_selectedDay)}',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _textDark),
+                    ),
+                    Text(
+                      '${data.dayName} • ${data.status.toUpperCase()}',
+                      style: const TextStyle(fontSize: 12, color: _textLight),
+                    ),
+                  ],
+                ),
               ),
-              const Spacer(),
-              _buildStatusChip(data['status'] ?? 'unknown'),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _errorRed.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  data.status.toUpperCase(),
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: _getStatusColor(data.status),
+                  ),
+                ),
+              ),
             ],
           ),
+          
           const Divider(height: 24, thickness: 1, color: _borderColor),
-
-          // Timings
-          _buildTimingRow('In Time:', data['inTime'] ?? '--:--', Icons.login_rounded, _accentGreen),
-          _buildTimingRow('Out Time:', data['outTime'] ?? '--:--', Icons.logout_rounded, _errorRed),
+          
+          // Timing Details
+          _buildTimingRow('In Time:', data.inTime ?? '--:--', Icons.login_rounded, _accentGreen),
+          _buildTimingRow('Out Time:', data.outTime ?? '--:--', Icons.logout_rounded, _errorRed),
+          _buildInfoRow('Working Hours:', data.workingHours ?? '0h 0m', Icons.hourglass_bottom_rounded),
+          
+          if (data.isLate && data.lateBy != null) ...[
+            const SizedBox(height: 4),
+            _buildInfoRow('Late By:', data.lateBy!, Icons.warning_rounded, isWarning: true),
+          ],
+          
+          // Office Hours
           const SizedBox(height: 8),
-          _buildInfoRow('Working Hours:', data['workingHours'] ?? '0h 0m', Icons.hourglass_bottom_rounded),
-          _buildInfoRow('Break Time:', data['breakTime'] ?? '0m', Icons.coffee_rounded),
-          _buildInfoRow('Tiffin Time:', data['tiffinTime'] ?? '0m', Icons.restaurant_rounded),
-
-
-          if ((data['tasks'] as List?)?.isNotEmpty ?? false) ...[
+          _buildInfoRow('Office Hours:', '${data.openingTime} - ${data.closingTime}', Icons.business_rounded),
+          _buildInfoRow('Work Location:', data.workLocationStatus, Icons.location_on_rounded),
+          
+          // Lunch Section
+          if (data.lunchIn != null || data.lunchOut != null || data.lunchStatus.isNotEmpty) ...[
             const Divider(height: 24, thickness: 1, color: _borderColor),
-            _buildSectionTitle('Tasks Completed', Icons.checklist_rtl_rounded),
+            _buildSectionTitle('Lunch Break', Icons.restaurant_rounded),
             const SizedBox(height: 8),
-            ... (data['tasks'] as List<String>).map((task) => _buildListItem(task)).toList(),
+            _buildInfoRow('Lunch In:', data.lunchIn ?? 'Not started', Icons.restaurant_rounded),
+            _buildInfoRow('Lunch Out:', data.lunchOut ?? 'Ongoing', Icons.restaurant_rounded),
+            _buildInfoRow('Status:', data.lunchStatus.toUpperCase(), Icons.info_rounded),
+            if (data.totalLunchTime != null)
+              _buildInfoRow('Total Time:', data.totalLunchTime!, Icons.timer_rounded),
           ],
-
-          if ((data['logs'] as List?)?.isNotEmpty ?? false) ...[
+          
+          // Breaks Section
+          if (data.breaks.entries.isNotEmpty) ...[
             const Divider(height: 24, thickness: 1, color: _borderColor),
-            _buildSectionTitle('Activity Logs', Icons.history_rounded),
+            _buildSectionTitle('Breaks', Icons.coffee_rounded),
             const SizedBox(height: 8),
-            ... (data['logs'] as List<String>).map((log) => _buildListItem(log, isLog: true)).toList(),
+            _buildInfoRow('Total Break Time:', data.breaks.totalBreakTime, Icons.coffee_rounded),
+            ...data.breaks.entries.map((breakEntry) => 
+              _buildInfoRow(
+                'Break:', 
+                '${breakEntry.breakIn ?? 'Started'} - ${breakEntry.breakOut ?? 'Ongoing'}',
+                Icons.pause_circle_rounded
+              ),
+            ),
           ],
-          const SizedBox(height: 10), // Add some padding at the bottom if content is short
+          
+          // Task History Section
+          if (data.taskHistory.isNotEmpty) ...[
+            const Divider(height: 24, thickness: 1, color: _borderColor),
+            _buildSectionTitle('Task History', Icons.task_rounded),
+            const SizedBox(height: 8),
+            ...data.taskHistory.map((task) => 
+              _buildListItem(
+                '${task.taskName ?? 'Unknown Task'} - ${task.status ?? 'Unknown'} (${task.duration ?? 'N/A'})',
+                isTask: true,
+              ),
+            ),
+          ],
+          
+          // Additional Information
+          if (data.reason != null || data.leaveReason != null || data.holidayName != null) ...[
+            const Divider(height: 24, thickness: 1, color: _borderColor),
+            _buildSectionTitle('Additional Information', Icons.info_rounded),
+            const SizedBox(height: 8),
+            if (data.reason != null)
+              _buildInfoRow('Reason:', data.reason!, Icons.note_rounded),
+            if (data.leaveType != null)
+              _buildInfoRow('Leave Type:', data.leaveType!, Icons.event_busy_rounded),
+            if (data.leaveReason != null)
+              _buildInfoRow('Leave Reason:', data.leaveReason!, Icons.event_busy_rounded),
+            if (data.holidayName != null)
+              _buildInfoRow('Holiday:', data.holidayName!, Icons.celebration_rounded),
+          ],
+          
+          const SizedBox(height: 10),
         ],
       ),
     );
   }
 
-  Widget _buildStatusChip(String status) {
-    Color chipColor = _textLight;
-    String statusText = status.toUpperCase();
-
-    switch (status.toLowerCase()) {
-      case 'present':
-        chipColor = _accentGreen;
-        break;
-      case 'absent':
-        chipColor = _errorRed;
-        break;
-      case 'leave':
-        chipColor = _accentOrange;
-        break;
-      case 'holiday':
-        chipColor = _accentBlue; // Define _accentBlue or use Colors.blue
-        break;
-    }
-    return Chip(
-      label: Text(statusText, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-      backgroundColor: chipColor,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      labelPadding: EdgeInsets.zero,
-      visualDensity: VisualDensity.compact,
-    );
-  }
 
 
   Widget _buildTimingRow(String label, String value, IconData icon, Color iconColor) {
@@ -650,16 +1311,23 @@ class _AttendancePageState extends State<AttendancePage>
     );
   }
 
-  Widget _buildInfoRow(String label, String value, IconData icon) {
+  Widget _buildInfoRow(String label, String value, IconData icon, {bool isWarning = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: _textLight.withOpacity(0.8)),
+          Icon(icon, size: 16, color: isWarning ? _errorRed : _textLight.withOpacity(0.8)),
           const SizedBox(width: 8),
           Text(label, style: const TextStyle(fontSize: 13, color: _textLight, fontWeight: FontWeight.w500)),
           const Spacer(),
-          Text(value, style: const TextStyle(fontSize: 13, color: _textDark, fontWeight: FontWeight.w600)),
+          Text(
+            value, 
+            style: TextStyle(
+              fontSize: 13, 
+              color: isWarning ? _errorRed : _textDark, 
+              fontWeight: FontWeight.w600
+            )
+          ),
         ],
       ),
     );
@@ -675,21 +1343,31 @@ class _AttendancePageState extends State<AttendancePage>
     );
   }
 
-  Widget _buildListItem(String item, {bool isLog = false}) {
+  Widget _buildListItem(String item, {bool isLog = false, bool isTask = false}) {
+    IconData icon;
+    Color iconColor;
+    
+    if (isTask) {
+      icon = Icons.task_alt_rounded;
+      iconColor = _accentBlue.withOpacity(0.8);
+    } else if (isLog) {
+      icon = Icons.timer_outlined;
+      iconColor = _textLight.withOpacity(0.7);
+    } else {
+      icon = Icons.check_circle_outline_rounded;
+      iconColor = _accentGreen.withOpacity(0.8);
+    }
+    
     return Padding(
-      padding: EdgeInsets.only(left: isLog ? 0 : 8.0, top: 4, bottom: 4), // Indent tasks, not logs
+      padding: EdgeInsets.only(left: isLog ? 0 : 8.0, top: 4, bottom: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!isLog) Icon(Icons.check_circle_outline_rounded, size: 14, color: _accentGreen.withOpacity(0.8)),
-          if (isLog) Icon(Icons.timer_outlined, size: 14, color: _textLight.withOpacity(0.7)),
+          Icon(icon, size: 14, color: iconColor),
           const SizedBox(width: 8),
           Expanded(child: Text(item, style: TextStyle(fontSize: 12, color: _textLight))),
         ],
       ),
     );
   }
-  // Define _accentBlue if not already present, or use a standard color
-  static const Color _accentBlue = Color(0xFF3B82F6); // Example blue color
-
 }

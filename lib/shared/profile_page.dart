@@ -3,98 +3,64 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../features/auth/auth_provider.dart';
+import '../features/dashboard/dashboard_employee_provider.dart';
+import '../core/models/employee_details.dart';
+import '../core/utils/logout_handler.dart';
 
-class ProfilePage extends ConsumerWidget {
+class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends ConsumerState<ProfilePage> {
+  @override
+  void initState() {
+    super.initState();
+    // Load employee details when the page is opened
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(dashboardEmployeeProvider.notifier).load();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final employeeState = ref.watch(dashboardEmployeeProvider);
+    
     return Scaffold(
       backgroundColor: Colors.white,
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            // Profile Header
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xFF422F90),
-                    Color(0xFF5A4FCF),
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Column(
-                children: [
-                  Container(
-                    width: 60,
-                    height: 60,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 3),
-                    ),
-                    child: ClipOval(
-                      child: Image.asset(
-                        'assets/images/avatar-dummy.jpg',
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            color: Colors.white,
-                            child: const Icon(
-                              Icons.person,
-                              color: Color(0xFF422F90),
-                              size: 35,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Admin User',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    'admin@admin.com',
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.8),
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
+      body: RefreshIndicator(
+        onRefresh: () async {
+          await ref.read(dashboardEmployeeProvider.notifier).load();
+        },
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              // Profile Header
+              _buildProfileHeader(employeeState),
+              const SizedBox(height: 20),
 
-            // Profile Options
-            _buildProfileOption(
-              icon: Icons.person_outline,
-              title: 'Personal Information',
-              subtitle: 'Update your details',
-              onTap: () {},
-            ),
+              // Profile Options
+              _buildProfileOption(
+                icon: Icons.person_outline,
+                title: 'Personal Information',
+                subtitle: 'Update your details',
+                onTap: () => _showPersonalInfoDialog(context, employeeState.details),
+              ),
             _buildProfileOption(
               icon: Icons.help_outline,
               title: 'Help & Support',
               subtitle: 'Get help and support',
-              onTap: () {},
+              onTap: () => _showHelpDialog(context),
             ),
             _buildProfileOption(
               icon: Icons.info_outline,
               title: 'About',
               subtitle: 'App version and info',
-              onTap: () {},
+              onTap: () => _showAboutDialog(context),
             ),
 
             const SizedBox(height: 20),
@@ -124,6 +90,231 @@ class ProfilePage extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    ),
+    );
+  }
+
+  Widget _buildProfileHeader(DashboardEmployeeState employeeState) {
+    if (employeeState.loading) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF422F90),
+              Color(0xFF5A4FCF),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Column(
+          children: [
+            CircularProgressIndicator(color: Colors.white),
+            SizedBox(height: 12),
+            Text(
+              'Loading...',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (employeeState.error != null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF422F90),
+              Color(0xFF5A4FCF),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: [
+            const Icon(Icons.error_outline, color: Colors.white, size: 40),
+            const SizedBox(height: 12),
+            Text(
+              employeeState.error!,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () {
+                ref.read(dashboardEmployeeProvider.notifier).load();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: const Color(0xFF422F90),
+              ),
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final details = employeeState.details;
+    final name = details?.name ?? 'Unknown User';
+    final email = details?.email ?? 'No email';
+    final profileImg = details?.profileImg;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Color(0xFF422F90),
+            Color(0xFF5A4FCF),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white, width: 3),
+            ),
+            child: ClipOval(
+              child: profileImg != null && profileImg.isNotEmpty
+                  ? Image.network(
+                      profileImg,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return _buildDefaultAvatar();
+                      },
+                    )
+                  : _buildDefaultAvatar(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            name,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            email,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.8),
+              fontSize: 14,
+            ),
+          ),
+          if (details?.employeeId != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              'ID: ${details!.employeeId}',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.7),
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDefaultAvatar() {
+    return Container(
+      color: Colors.white,
+      child: const Icon(
+        Icons.person,
+        color: Color(0xFF422F90),
+        size: 35,
+      ),
+    );
+  }
+
+  void _showPersonalInfoDialog(BuildContext context, EmployeeDetailsData? details) {
+    if (details == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Employee details not loaded')),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Personal Information'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildInfoRow('Name', details.name),
+              _buildInfoRow('Employee ID', details.employeeId),
+              _buildInfoRow('Email', details.email),
+              _buildInfoRow('Gender', details.gender),
+              _buildInfoRow('Department', details.departmentName),
+              _buildInfoRow('Designation', details.designationName),
+              _buildInfoRow('Status', details.status),
+              _buildInfoRow('Work Location', details.todayWorkLocation.replaceAll('_', ' ').toUpperCase()),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              '$label:',
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value.isNotEmpty ? value : 'Not specified',
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -174,6 +365,107 @@ class ProfilePage extends ConsumerWidget {
           size: 16,
         ),
         onTap: onTap,
+      ),
+    );
+  }
+
+  void _showHelpDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Help & Support'),
+        content: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Need Help?',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF422F90),
+              ),
+            ),
+            SizedBox(height: 12),
+            Text('For technical support or questions about the app, please contact:'),
+            SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(Icons.email, size: 16, color: Colors.grey),
+                SizedBox(width: 8),
+                Text('support@ecashbook.com'),
+              ],
+            ),
+            SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(Icons.phone, size: 16, color: Colors.grey),
+                SizedBox(width: 8),
+                Text('+1 (555) 123-4567'),
+              ],
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Common Issues:',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            SizedBox(height: 4),
+            Text('• Login problems - Check credentials'),
+            Text('• Biometric issues - Check device settings'),
+            Text('• Location errors - Enable GPS'),
+            Text('• Sync problems - Check internet connection'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAboutDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('About EcashBook'),
+        content: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'EcashBook',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF422F90),
+              ),
+            ),
+            SizedBox(height: 8),
+            Text('Version: 1.0.0+1'),
+            SizedBox(height: 8),
+            Text('Employee management and payroll application with biometric authentication'),
+            SizedBox(height: 16),
+            Text(
+              'Features:',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            SizedBox(height: 4),
+            Text('• Biometric Authentication'),
+            Text('• Attendance Tracking'),
+            Text('• Payroll Management'),
+            Text('• Leave Management'),
+            Text('• Task Management'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
@@ -236,79 +528,8 @@ class ProfilePage extends ConsumerWidget {
                 },
               );
 
-              try {
-                debugPrint('🚪 Profile page: Starting safe logout process');
-
-                // ✅ SAFE: Clear preferences with null checks
-                try {
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setBool('is_first_time', false);
-                  await prefs.setBool('user_logged_in', false);
-                  debugPrint('✅ Preferences cleared safely from profile page');
-                } catch (prefsError) {
-                  debugPrint('⚠️ Preferences error (continuing): $prefsError');
-                }
-
-                // ✅ SAFE: Call auth logout with try-catch
-                try {
-                  await ref.read(authProvider.notifier).logout();
-                  debugPrint('✅ Auth logout completed from profile page');
-                } catch (authError) {
-                  debugPrint('⚠️ Auth logout error (continuing): $authError');
-                }
-
-                // ✅ SAFE: Close loading dialog
-                if (context.mounted) {
-                  try {
-                    Navigator.pop(context); // Close loading dialog
-                    debugPrint('✅ Loading dialog closed from profile page');
-                  } catch (popError) {
-                    debugPrint('⚠️ Could not close loading dialog: $popError');
-                  }
-                }
-
-                // ✅ SAFE: Wait and navigate
-                await Future.delayed(const Duration(milliseconds: 50));
-
-                if (context.mounted) {
-                  try {
-                    // ✅ SAFE: Use pushNamedAndRemoveUntil with error handling
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      '/login',
-                          (route) => false,
-                    );
-                    debugPrint('✅ Safe navigation to login completed from profile page');
-                  } catch (navError) {
-                    debugPrint('❌ Navigation error from profile page, trying fallback: $navError');
-
-                    // ✅ FALLBACK: Try alternative navigation
-                    try {
-                      Navigator.pushReplacementNamed(context, '/login');
-                    } catch (fallbackError) {
-                      debugPrint('❌ Fallback navigation failed from profile page: $fallbackError');
-                    }
-                  }
-                }
-
-              } catch (e) {
-                debugPrint('❌ Profile page logout process error: $e');
-
-                // ✅ EMERGENCY: Force navigation even on error
-                if (context.mounted) {
-                  try {
-                    Navigator.pop(context); // Close any open dialog
-                  } catch (_) {}
-
-                  try {
-                    Navigator.of(context).pushNamedAndRemoveUntil(
-                      '/login',
-                          (route) => false,
-                    );
-                  } catch (emergencyError) {
-                    debugPrint('❌ Emergency navigation failed from profile page: $emergencyError');
-                  }
-                }
-              }
+              // Use the new logout handler
+              await LogoutHandler.performLogout(context, ref);
             },
             child: const Text('Logout'),
           ),

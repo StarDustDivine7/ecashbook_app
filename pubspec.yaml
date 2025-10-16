@@ -1,5 +1,5 @@
 name: ecashbook_app
-description: "Employee management and payroll application with biometric authentication"
+description: "Employee management and payroll application with PIN authentication"
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -15,7 +15,7 @@ dependencies:
   flutter_riverpod: ^2.6.1      # State Management
   go_router: ^16.2.0            # Navigation & Routing
   dio: ^5.9.0                   # Network & API
-  local_auth: ^2.3.0            # Security & Authentication
+
   permission_handler: ^12.0.1   # Device Features
   geolocator: ^14.0.2           # Device Features
   camera: ^0.11.0+2             # Device Features
@@ -27,6 +27,8 @@ dependencies:
   open_filex: ^4.7.0
   share_plus: ^11.1.0
   table_calendar: ^3.2.0
+  intl: ^0.20.2
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:

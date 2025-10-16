@@ -81,6 +81,33 @@ class AuthResult {
   AuthResult({required this.success, this.message, this.token, this.tokenType, this.secure, this.user});
 }
 
+class LogoutResult {
+  final bool success;
+  final String message;
+  final String? errorCode;
+  final bool isUnauthorized;
+
+  LogoutResult({
+    required this.success, 
+    required this.message, 
+    this.errorCode,
+    this.isUnauthorized = false,
+  });
+
+  factory LogoutResult.fromJson(Map json) => LogoutResult(
+    success: json['success'] == true,
+    message: (json['message'] ?? '').toString(),
+    errorCode: json['error_code']?.toString(),
+  );
+
+  factory LogoutResult.unauthorized() => LogoutResult(
+    success: false,
+    message: 'Unauthorized access. Invalid or expired token.',
+    errorCode: 'TOKEN_MISMATCH',
+    isUnauthorized: true,
+  );
+}
+
 class AuthService {
   // Keys
   static const String _kToken = 'auth_token';
@@ -151,6 +178,32 @@ class AuthService {
     await p.remove(_kUser);
   }
 
+  static Future<void> clearAllAppData() async {
+    final p = await SharedPreferences.getInstance();
+    // Clear auth data
+    await p.remove(_kLastAuth);
+    await p.remove(_kToken);
+    await p.remove(_kTokenType);
+    await p.remove(_kSecure);
+    await p.remove(_kUser);
+    await p.remove(_kDeviceToken);
+    
+    // Clear app state
+    await p.remove('user_logged_in');
+    await p.remove('app_was_backgrounded');
+    await p.remove('app_paused_time');
+    await p.remove('pin_attempt_count');
+    await p.remove('last_app_close_time');
+    
+    // Keep these for app functionality
+    // - is_first_time (for onboarding)
+    // - onboarding_completed
+    // - permissions_granted
+    // - lock_setup_completed
+    // - has_ever_logged_in
+    // - app_passcode_hash (PIN)
+  }
+
   static Future<bool> isSessionActive({Duration timeout = const Duration(minutes: 120)}) async {
     final p = await SharedPreferences.getInstance();
     final ts = p.getInt(_kLastAuth) ?? 0;
@@ -213,6 +266,31 @@ class AuthService {
     return 'Network error';
   }
 
+  // Check if response indicates unauthorized access
+  static bool isUnauthorizedResponse(dynamic responseData, int? statusCode) {
+    if (statusCode == 401) return true;
+    
+    if (responseData is Map) {
+      final success = responseData['success'];
+      final errorCode = responseData['error_code']?.toString();
+      final message = responseData['message']?.toString() ?? '';
+      
+      return success == false && 
+             (errorCode == 'TOKEN_MISMATCH' || 
+              message.toLowerCase().contains('unauthorized') ||
+              message.toLowerCase().contains('invalid') && message.toLowerCase().contains('token') ||
+              message.toLowerCase().contains('expired') && message.toLowerCase().contains('token'));
+    }
+    
+    return false;
+  }
+
+  // Handle unauthorized response by clearing data and returning appropriate result
+  static Future<void> handleUnauthorizedResponse() async {
+    // debugPrint('🔒 Handling unauthorized response - clearing app data');
+    await clearAllAppData();
+  }
+
   // Auth
   static Future<AuthResult> loginWithAPI(String email, String password) async {
     try {
@@ -266,6 +344,73 @@ class AuthService {
       return AuthResult(success: false, message: _handleNetworkError(e));
     } catch (_) {
       return AuthResult(success: false, message: 'Login failed');
+    }
+  }
+
+  // Logout API
+  static Future<LogoutResult> logoutWithAPI() async {
+    try {
+      final headers = await _authHeaders();
+      final user = await getSavedUser();
+      final secure = await getSecure();
+      
+      if (user == null || secure == null) {
+        // No user data, treat as successful logout
+        await clearAllAppData();
+        return LogoutResult(success: true, message: 'Logged out successfully');
+      }
+
+      final body = {
+        'empId': user.employeeId,
+        'secure': secure,
+      };
+
+      final resp = await ApiClient.dio.post(
+        ApiConfig.logout,
+        data: jsonEncode(body),
+        options: Options(
+          headers: headers,
+          validateStatus: (status) => status != null && status < 500, // Accept all non-server errors
+        ),
+      );
+
+      // Handle 401 Unauthorized specifically
+      if (resp.statusCode == 401) {
+        await clearAllAppData();
+        return LogoutResult.unauthorized();
+      }
+
+      final Map<String, dynamic> map = resp.data is Map
+          ? Map<String, dynamic>.from(resp.data as Map)
+          : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+
+      final result = LogoutResult.fromJson(map);
+      
+      // Clear app data regardless of API response for logout
+      await clearAllAppData();
+      
+      return result;
+      
+    } on DioException catch (e) {
+      // Handle network errors
+      if (e.response?.statusCode == 401) {
+        await clearAllAppData();
+        return LogoutResult.unauthorized();
+      }
+      
+      // For other errors, still clear data and return error
+      await clearAllAppData();
+      return LogoutResult(
+        success: false, 
+        message: _handleNetworkError(e),
+      );
+    } catch (e) {
+      // For any other errors, clear data and return generic error
+      await clearAllAppData();
+      return LogoutResult(
+        success: false, 
+        message: 'Logout failed: ${e.toString()}',
+      );
     }
   }
 

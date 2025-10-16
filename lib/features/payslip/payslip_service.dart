@@ -95,12 +95,9 @@ class PayslipService {
   // ✅ GET PAYSLIP FOR SPECIFIC MONTH/YEAR
   Future<PayslipData?> getPayslip(String month, int year) async {
     try {
-      debugPrint('🔍 Fetching payslip for $month $year');
-
       // Check if payslip exists in cache first
       final cachedPayslip = await _getCachedPayslip(month, year);
       if (cachedPayslip != null) {
-        debugPrint('✅ Found cached payslip');
         return cachedPayslip;
       }
 
@@ -110,7 +107,6 @@ class PayslipService {
       // Cache the generated payslip
       await _cachePayslip(payslip);
 
-      debugPrint('✅ Generated new payslip for ${payslip.employeeName}');
       return payslip;
 
     } catch (e) {
@@ -203,7 +199,6 @@ class PayslipService {
       // Save to preferences
       await prefs.setString(_storageKey, jsonEncode(cachedPayslips));
 
-      debugPrint('💾 Cached payslip for ${payslip.month} ${payslip.year}');
     } catch (e) {
       debugPrint('❌ Error caching payslip: $e');
     }
@@ -367,7 +362,6 @@ class PayslipService {
       if (cachedPayslips.containsKey(key)) {
         cachedPayslips.remove(key);
         await prefs.setString(_storageKey, jsonEncode(cachedPayslips));
-        debugPrint('🗑️ Deleted payslip for $month $year');
         return true;
       }
 
@@ -383,7 +377,6 @@ class PayslipService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_storageKey);
-      debugPrint('🗑️ Cleared all cached payslips');
     } catch (e) {
       debugPrint('❌ Error clearing payslips: $e');
     }
@@ -430,8 +423,6 @@ class PayslipService {
           _employeeData = Map<String, String>.from(data['employeeData']);
           await _saveEmployeeData();
         }
-
-        debugPrint('✅ Imported ${data['payslips'].length} payslips');
         return true;
       }
 

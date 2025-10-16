@@ -4,15 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/theme.dart';
-import 'core/services/biometric_service.dart';
 import 'features/auth/auth_provider.dart';
-import 'features/auth/biometric_provider.dart';
+import 'features/security/pin_provider.dart';
 import 'features/auth/login_page.dart';
 import 'features/onboarding/introduction_screen.dart';
 import 'features/permissions/permission_screen.dart';
 import 'features/permissions/location_accuracy_screen.dart';
-import 'features/biometric/biometric_screen.dart';
 import 'features/security/app_passcode_screen.dart';
+import 'features/security/pin_unlock_screen.dart';
 import 'shared/main_layout.dart';
 
 void main() => runApp(const ProviderScope(child: EcashbookApp()));
@@ -31,8 +30,6 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _setupScreenStateListener();
-    BiometricNotifier.setNavigatorKey(navigatorKey);
 
   }
 
@@ -74,15 +71,6 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
     title: 'EcashBook',
     debugShowCheckedModeBanner: false,
     theme: ecTheme,
-    onGenerateRoute: (settings) {
-      if (settings.name == '/biometric') {
-        return MaterialPageRoute(builder: (_) => const BiometricScreen(), settings: settings);
-      }
-      return MaterialPageRoute(
-        builder: (_) => _buildSplashScreenWidget(message, subtitle: subtitle),
-        settings: settings,
-      );
-    },
     home: _buildSplashScreenWidget(message, subtitle: subtitle),
   );
 
@@ -116,39 +104,11 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
     ),
   );
 
-  // —— Lifecycle integration with biometric provider ——
-  void _setupScreenStateListener() {
-    SystemChannels.lifecycle.setMessageHandler((message) async {
-      if (!mounted) return null;
-      try {
-        final biometricNotifier = ref.read(biometricProvider.notifier);
-
-        if (message == AppLifecycleState.resumed.toString()) {
-          biometricNotifier.onScreenStateChanged(true);
-        } else if (message == AppLifecycleState.paused.toString() || message == AppLifecycleState.inactive.toString()) {
-          biometricNotifier.onScreenStateChanged(false);
-        }
-      } catch (_) {}
-      return null;
-    });
-  }
-
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     try {
-      final biometricNotifier = ref.read(biometricProvider.notifier);
-      biometricNotifier.onAppLifecycleChanged(state);
-      switch (state) {
-        case AppLifecycleState.resumed:
-          biometricNotifier.onScreenStateChanged(true);
-          break;
-        case AppLifecycleState.paused:
-        case AppLifecycleState.inactive:
-        case AppLifecycleState.hidden:
-        case AppLifecycleState.detached:
-          biometricNotifier.onScreenStateChanged(false);
-          break;
-      }
+      final pinNotifier = ref.read(pinProvider.notifier);
+      pinNotifier.onAppLifecycleChanged(state);
     } catch (_) {}
   }
 
@@ -157,22 +117,24 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
     return Consumer(builder: (context, ref, child) {
       try {
         final authState = ref.watch(authProvider);
-        final biometricState = ref.watch(biometricProvider);
-        final isBiometricRequired = biometricState.isRequired;
-        final isBiometricLoading = biometricState.isLoading;
+        final pinState = ref.watch(pinProvider);
+        final isPinRequired = pinState.isRequired;
 
         // Auth initializing splash
         if (authState.isInitializing) {
           return _buildSplashScreen('Initializing...', subtitle: 'Setting up your secure workspace');
         }
 
-        // When logged-in and biometric is required, allow provider to route to lock screen
-        if (authState.isLoggedIn && isBiometricRequired && !isBiometricLoading) {
-          return _buildSplashScreen('Preparing Security Check...', subtitle: 'Please wait while we setup authentication');
-        }
+        // PIN requirement is handled automatically by the PIN provider
 
-        if (isBiometricLoading) {
-          return _buildSplashScreen('Authenticating...', subtitle: 'Please complete your biometric verification');
+        // When logged-in and PIN is required, show PIN unlock screen
+        if (authState.isLoggedIn && isPinRequired) {
+          return MaterialApp(
+            title: 'EcashBook',
+            debugShowCheckedModeBanner: false,
+            theme: ecTheme,
+            home: const PinUnlockScreen(),
+          );
         }
 
         // Main router
@@ -196,7 +158,6 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
   }
 
   Route _generateRoute(RouteSettings settings, AuthState authState) {
-
     switch (settings.name) {
       case '/resolver':
         return MaterialPageRoute(builder: (_) => _StartupResolver(authState: authState));
@@ -208,8 +169,8 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
         return MaterialPageRoute(builder: (_) => const LocationAccuracyScreen(), settings: settings);
       case '/app-passcode':
         return MaterialPageRoute(builder: (_) => const AppPasscodeScreen(), settings: settings);
-      case '/biometric':
-        return MaterialPageRoute(builder: (_) => const BiometricScreen(), settings: settings);
+      case '/pin-unlock':
+        return MaterialPageRoute(builder: (_) => const PinUnlockScreen(), settings: settings);
       case '/login':
         return MaterialPageRoute(builder: (_) => const LoginPage(), settings: settings);
       case '/dashboard':
@@ -248,43 +209,61 @@ class _StartupResolverState extends ConsumerState<_StartupResolver> {
   Future _decide() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final isFirstTime = prefs.getBool('is_first_time') ?? true;
       final onboardingDone = prefs.getBool('onboarding_completed') ?? false;
       final permsDone = prefs.getBool('permissions_granted') ?? false;
+      final lockSetup = prefs.getBool('lock_setup_completed') ?? false;
+      final hasEverLoggedIn = prefs.getBool('has_ever_logged_in') ?? false;
+      final isLoggedIn = widget.authState.isLoggedIn;
 
-      // Step 1: Onboarding only once
-      if (!onboardingDone) {
-        _go('/introduction');
+
+
+      // FIRST-TIME APP LAUNCH FLOW
+      if (isFirstTime) {
+        // Step 1: Show Dashboard first (as per requirement)
+        if (!onboardingDone) {
+          // Set a flag to trigger permissions after dashboard is shown
+          await prefs.setBool('show_permissions_after_dashboard', true);
+          _go('/dashboard');
+          return;
+        }
+
+        // Step 2: Request permissions
+        if (!permsDone) {
+          _go('/permissions');
+          return;
+        }
+
+        // Step 3: Set up lock screen
+        if (!lockSetup) {
+          _go('/app-passcode');
+          return;
+        }
+
+        // Step 4: Show login screen (one-time only)
+        if (!hasEverLoggedIn) {
+          _go('/login');
+          return;
+        }
+      }
+
+      // NORMAL USAGE AFTER FIRST LOGIN
+      if (hasEverLoggedIn && isLoggedIn) {
+        // Check if PIN is required (app reopen/background)
+        final pin = ref.read(pinProvider);
+        if (pin.isRequired) {
+          _go('/pin-unlock');
+          return;
+        }
+
+        _go('/dashboard');
         return;
       }
 
-      // Step 2: Permissions once
-      if (!permsDone) {
-        _go('/permissions');
-        return;
-      }
-
-      // Step 3: App security decision
-      final deviceSecure = await BiometricService.isDeviceSecure();
-      final appPinSet = prefs.getString('app_passcode_hash')?.isNotEmpty == true;
-      final loggedIn = widget.authState.isLoggedIn;
-
-      // If device not secure and no app PIN, require PIN creation/entry
-      if (!deviceSecure && !appPinSet) {
-        _go('/app-passcode');
-        return;
-      }
-
-      // If logged in and biometric required, route to Biometric screen
-      final bio = ref.read(biometricProvider);
-      if (loggedIn && bio.isRequired) {
-        _go('/biometric');
-        return;
-      }
-
-      // Step 4: If not logged in -> login; else -> dashboard
-      _go(loggedIn ? '/dashboard' : '/login');
+      // FALLBACK: Not logged in
+      _go('/login');
     } catch (e) {
-
+      debugPrint('❌ Startup decision error: $e');
       _go('/login');
     }
   }

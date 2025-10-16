@@ -4,65 +4,80 @@ import 'package:flutter/services.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../core/constants.dart';
+import 'pin_provider.dart';
 
-class AppPasscodeScreen extends ConsumerStatefulWidget {
-  const AppPasscodeScreen({super.key});
+class PinUnlockScreen extends ConsumerStatefulWidget {
+  const PinUnlockScreen({super.key});
+
   @override
-  ConsumerState createState() => _AppPasscodeScreenState();
+  ConsumerState<PinUnlockScreen> createState() => _PinUnlockScreenState();
 }
 
-class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with TickerProviderStateMixin {
+class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
+    with TickerProviderStateMixin {
   String _pin = '';
-  String _firstPin = '';
-  bool _hasPin = false;
-  bool _isSetting = false;
-  bool _isConfirming = false;
-  String? _error;
   late AnimationController _shakeController;
-  late AnimationController _fadeController;
   late Animation<double> _shakeAnimation;
-  late Animation<double> _fadeAnimation;
+  
+  bool _isLoading = false;
+  String? _errorMessage;
+  int _attemptCount = 0;
+  static const int _maxAttempts = AppConstants.maxPinAttempts;
 
   @override
   void initState() {
     super.initState();
+    _initAnimations();
+    _setSystemUIOverlay();
+  }
+
+  void _setSystemUIOverlay() {
+    // Hide system UI overlays to prevent notification bar access
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.immersiveSticky,
+      overlays: [],
+    );
+  }
+
+  void _restoreSystemUIOverlay() {
+    // Restore system UI overlays
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.edgeToEdge,
+      overlays: SystemUiOverlay.values,
+    );
+  }
+
+  void _initAnimations() {
     _shakeController = AnimationController(
       duration: const Duration(milliseconds: 500),
-      vsync: this,
-    );
-    _fadeController = AnimationController(
-      duration: const Duration(milliseconds: 300),
       vsync: this,
     );
     _shakeAnimation = Tween<double>(begin: 0, end: 10).animate(
       CurvedAnimation(parent: _shakeController, curve: Curves.elasticIn),
     );
-    _fadeAnimation = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _fadeController, curve: Curves.easeIn),
-    );
-    _load();
-    _fadeController.forward();
   }
 
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _hasPin = (prefs.getString('app_passcode_hash') ?? '').isNotEmpty;
-      _isSetting = !_hasPin;
-    });
+  @override
+  void dispose() {
+    _restoreSystemUIOverlay();
+    _shakeController.dispose();
+    super.dispose();
   }
 
-  String _hash(String input) => sha256.convert(utf8.encode(input)).toString();
+  String _hashPin(String pin) {
+    return sha256.convert(utf8.encode(pin)).toString();
+  }
 
   void _addDigit(String digit) {
     if (_pin.length < 4) {
       setState(() {
         _pin += digit;
-        _error = null;
+        _errorMessage = null;
       });
       HapticFeedback.lightImpact();
       if (_pin.length == 4) {
-        Future.delayed(const Duration(milliseconds: 200), _submit);
+        Future.delayed(const Duration(milliseconds: 200), _verifyPin);
       }
     }
   }
@@ -71,103 +86,109 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
     if (_pin.isNotEmpty) {
       setState(() {
         _pin = _pin.substring(0, _pin.length - 1);
-        _error = null;
+        _errorMessage = null;
       });
       HapticFeedback.lightImpact();
     }
   }
 
-  Future<void> _submit() async {
+  Future<void> _verifyPin() async {
     if (_pin.length != 4) {
-      _showError('Enter 4 digits');
+      _showError('Please enter 4-digit PIN');
       return;
     }
-    
-    final prefs = await SharedPreferences.getInstance();
-    
-    if (_isSetting) {
-      if (!_isConfirming) {
-        // First PIN entry - store it and ask for confirmation
-        setState(() {
-          _firstPin = _pin;
-          _pin = '';
-          _isConfirming = true;
-          _error = null;
-        });
-      } else {
-        // Confirming PIN - check if they match
-        if (_pin == _firstPin) {
-          // PINs match - save and proceed
-          await prefs.setString('app_passcode_hash', _hash(_pin));
-          setState(() => _hasPin = true);
-          _next();
-        } else {
-          // PINs don't match - show error and restart
-          _showError('PINs do not match');
-          _shakeController.forward().then((_) => _shakeController.reset());
-          setState(() {
-            _pin = '';
-            _firstPin = '';
-            _isConfirming = false;
-          });
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedHash = prefs.getString('app_passcode_hash') ?? '';
+      final enteredHash = _hashPin(_pin);
+
+      await Future.delayed(const Duration(milliseconds: 500)); // Simulate processing
+
+      if (savedHash == enteredHash) {
+        // PIN is correct
+        
+        // Clear attempt count and PIN requirement
+        await prefs.remove('pin_attempt_count');
+        await prefs.remove('app_was_backgrounded');
+        await prefs.remove('app_paused_time');
+        ref.read(pinProvider.notifier).clearPinRequired();
+        
+        // Restore system UI and navigate to dashboard
+        _restoreSystemUIOverlay();
+        if (mounted) {
+          Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (route) => false);
         }
-      }
-    } else {
-      // Unlocking with existing PIN
-      final saved = prefs.getString('app_passcode_hash') ?? '';
-      if (saved == _hash(_pin)) {
-        _next();
       } else {
-        _showError('Incorrect PIN');
+        // PIN is incorrect
+        _attemptCount++;
+        await prefs.setInt('pin_attempt_count', _attemptCount);
+        
+        if (_attemptCount >= _maxAttempts) {
+          _showError('Too many failed attempts. Please restart the app.');
+        } else {
+          _showError('Incorrect PIN. ${_maxAttempts - _attemptCount} attempts remaining.');
+        }
+        
         _shakeController.forward().then((_) => _shakeController.reset());
         setState(() => _pin = '');
+      }
+    } catch (e) {
+      debugPrint('❌ PIN verification error: $e');
+      _showError('Verification failed. Please try again.');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
       }
     }
   }
 
   void _showError(String message) {
-    setState(() => _error = message);
-    HapticFeedback.heavyImpact();
+    setState(() => _errorMessage = message);
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) {
+        setState(() => _errorMessage = null);
+      }
+    });
   }
 
-  void _next() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('lock_setup_completed', true);
-
-    final hasEverLoggedIn = prefs.getBool('has_ever_logged_in') ?? false;
-    final isFirstTime = prefs.getBool('is_first_time') ?? true;
-
-    if (isFirstTime && !hasEverLoggedIn) {
-      Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
-    } else {
-      Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (r) => false);
-    }
-  }
-
-  @override
-  void dispose() {
-    _shakeController.dispose();
-    _fadeController.dispose();
-    super.dispose();
+  void _exitApp() {
+    SystemNavigator.pop();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF6E48AA),
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF422F90), Color(0xFF6E48AA)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) {
+        if (!didPop) {
+          _exitApp();
+        }
+      },
+      child: Scaffold(
+        resizeToAvoidBottomInset: false,
+        extendBodyBehindAppBar: true,
+        backgroundColor: const Color(0xFF6E48AA),
+        body: Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF422F90), Color(0xFF6E48AA)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
           ),
-        ),
-        child: SafeArea(
-          child: FadeTransition(
-            opacity: _fadeAnimation,
+          child: SafeArea(
+            top: true,
+            bottom: true,
+            left: true,
+            right: true,
             child: Center(
               child: SingleChildScrollView(
                 child: Padding(
@@ -175,33 +196,12 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Back button for confirmation step
-                      if (_isSetting && _isConfirming)
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: IconButton(
-                            onPressed: () {
-                              setState(() {
-                                _pin = '';
-                                _firstPin = '';
-                                _isConfirming = false;
-                                _error = null;
-                              });
-                            },
-                            icon: Icon(
-                              Icons.arrow_back_ios,
-                              color: Colors.white.withOpacity(0.8),
-                              size: 20,
-                            ),
-                          ),
-                        ),
-                      
                       // App Logo and Title Section
                       Column(
                         children: [
                           Container(
-                            width: 70,
-                            height: 70,
+                            width: 60,
+                            height: 60,
                             decoration: BoxDecoration(
                               color: Colors.white.withOpacity(0.15),
                               shape: BoxShape.circle,
@@ -212,64 +212,32 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                             ),
                             child: Icon(
                               Icons.account_balance_wallet_rounded,
-                              size: 35,
+                              size: 30,
                               color: Colors.white.withOpacity(0.95),
                             ),
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 12),
                           const Text(
                             'EcashBook',
                             style: TextStyle(
-                              fontSize: 26,
+                              fontSize: 22,
                               fontWeight: FontWeight.w600,
                               color: Colors.white,
                             ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 6),
                           Text(
-                            _isSetting 
-                                ? (_isConfirming ? 'Confirm your PIN' : 'Set your PIN')
-                                : 'Enter PIN to unlock',
+                            'Enter PIN to unlock',
                             style: TextStyle(
-                              fontSize: 15,
+                              fontSize: 14,
                               color: Colors.white.withOpacity(0.8),
                               fontWeight: FontWeight.w400,
                             ),
                           ),
-                          
-                          // Progress indicator for PIN setup
-                          if (_isSetting)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 12.0),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Container(
-                                    width: 6,
-                                    height: 6,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.white.withOpacity(0.8),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Container(
-                                    width: 6,
-                                    height: 6,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: _isConfirming 
-                                          ? Colors.white.withOpacity(0.8)
-                                          : Colors.white.withOpacity(0.3),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
                         ],
                       ),
                       
-                      const SizedBox(height: 40),
+                      const SizedBox(height: 32),
                       
                       // PIN Input Display
                       AnimatedBuilder(
@@ -278,12 +246,14 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                           return Transform.translate(
                             offset: Offset(_shakeAnimation.value, 0),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                               decoration: BoxDecoration(
                                 color: Colors.white.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(16),
+                                borderRadius: BorderRadius.circular(14),
                                 border: Border.all(
-                                  color: Colors.white.withOpacity(0.25),
+                                  color: _errorMessage != null 
+                                      ? Colors.redAccent.withOpacity(0.8)
+                                      : Colors.white.withOpacity(0.25),
                                   width: 1,
                                 ),
                               ),
@@ -292,9 +262,9 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: List.generate(4, (index) {
                                   return Container(
-                                    width: 16,
-                                    height: 16,
-                                    margin: const EdgeInsets.symmetric(horizontal: 6),
+                                    width: 14,
+                                    height: 14,
+                                    margin: const EdgeInsets.symmetric(horizontal: 5),
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       color: index < _pin.length
@@ -313,28 +283,29 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                         },
                       ),
                       
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       
                       // Error Message
                       SizedBox(
-                        height: 24,
-                        child: _error != null
+                        height: 20,
+                        child: _errorMessage != null
                             ? Text(
-                                _error!,
+                                _errorMessage!,
                                 style: const TextStyle(
                                   color: Colors.redAccent,
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.w500,
                                 ),
+                                textAlign: TextAlign.center,
                               )
                             : null,
                       ),
                       
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 24),
                       
                       // Keypad
                       Container(
-                        constraints: const BoxConstraints(maxWidth: 260),
+                        constraints: const BoxConstraints(maxWidth: 220),
                         child: Column(
                           children: [
                             for (final row in [
@@ -344,13 +315,13 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                               ['', '0', '⌫']
                             ])
                               Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 6.0),
+                                padding: const EdgeInsets.symmetric(vertical: 4.0),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                   children: [
                                     for (var key in row)
                                       key.isEmpty
-                                          ? const SizedBox(width: 60)
+                                          ? const SizedBox(width: 50)
                                           : _buildKeypadButton(
                                               key,
                                               isBackspace: key == '⌫',
@@ -362,19 +333,40 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                         ),
                       ),
                       
-                      const SizedBox(height: 32),
+                      const SizedBox(height: 20),
+                      
+                      // Loading or Instructions
+                      if (_isLoading)
+                        Column(
+                          children: [
+                            const CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Verifying PIN...',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.8),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      
+                      const SizedBox(height: 24),
                       
                       // Exit Button
                       TextButton(
-                        onPressed: () => SystemNavigator.pop(),
+                        onPressed: _exitApp,
                         style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                         ),
                         child: Text(
                           'Exit App',
                           style: TextStyle(
                             color: Colors.white.withOpacity(0.7),
-                            fontSize: 14,
+                            fontSize: 12,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -400,8 +392,8 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
         }
       },
       child: Container(
-        width: 60,
-        height: 60,
+        width: 50,
+        height: 50,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           color: Colors.white.withOpacity(0.12),
@@ -415,12 +407,12 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
               ? Icon(
                   Icons.backspace_outlined,
                   color: Colors.white.withOpacity(0.9),
-                  size: 20,
+                  size: 18,
                 )
               : Text(
                   text,
                   style: TextStyle(
-                    fontSize: 20,
+                    fontSize: 18,
                     color: Colors.white.withOpacity(0.95),
                     fontWeight: FontWeight.w600,
                   ),

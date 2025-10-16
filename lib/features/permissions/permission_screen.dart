@@ -47,32 +47,54 @@ class _PermissionScreenState extends ConsumerState<PermissionScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF8FAFC),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // Back
-              IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.arrow_back_ios, color: Colors.black87),
-                padding: EdgeInsets.zero,
-                alignment: Alignment.centerLeft,
-              ),
               const SizedBox(height: 20),
+              
+              // App Icon
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1).withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.account_balance_wallet_rounded,
+                  size: 40,
+                  color: Color(0xFF6366F1),
+                ),
+              ),
+              
+              const SizedBox(height: 24),
+              
               // Title + subtitle
               const Text(
                 'App Permissions',
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87),
+                style: TextStyle(
+                  fontSize: 28, 
+                  fontWeight: FontWeight.bold, 
+                  color: Color(0xFF0F172A)
+                ),
+                textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 8),
-              Text(
+              const SizedBox(height: 12),
+              const Text(
                 'EcashBook needs these permissions to provide the best experience. All data is secured and never shared.',
-                style: TextStyle(fontSize: 16, color: Colors.grey, height: 1.4),
+                style: TextStyle(
+                  fontSize: 16, 
+                  color: Color(0xFF64748B), 
+                  height: 1.5
+                ),
+                textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 40),
+              
               // Permissions list
               Expanded(
                 child: ListView.builder(
@@ -83,9 +105,16 @@ class _PermissionScreenState extends ConsumerState<PermissionScreen> {
                       margin: const EdgeInsets.only(bottom: 16),
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.grey[10],
+                        color: Colors.white,
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.grey!, width: 1),
+                        border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.04),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
                       ),
                       child: Row(
                         children: [
@@ -93,7 +122,7 @@ class _PermissionScreenState extends ConsumerState<PermissionScreen> {
                             width: 48,
                             height: 48,
                             decoration: BoxDecoration(
-                              color: permission.color.withValues(alpha: 0.1),
+                              color: permission.color.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Icon(permission.icon, color: permission.color, size: 24),
@@ -103,16 +132,22 @@ class _PermissionScreenState extends ConsumerState<PermissionScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(permission.title,
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.black87,
-                                    )),
+                                Text(
+                                  permission.title,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xFF0F172A),
+                                  )
+                                ),
                                 const SizedBox(height: 4),
                                 Text(
                                   permission.description,
-                                  style: TextStyle(fontSize: 14, color: Colors.grey, height: 1.3),
+                                  style: const TextStyle(
+                                    fontSize: 14, 
+                                    color: Color(0xFF64748B), 
+                                    height: 1.3
+                                  ),
                                 ),
                               ],
                             ),
@@ -120,10 +155,17 @@ class _PermissionScreenState extends ConsumerState<PermissionScreen> {
                           const SizedBox(width: 12),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(color: Colors.red[10], borderRadius: BorderRadius.circular(8)),
-                            child: Text(
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEF2F2), 
+                              borderRadius: BorderRadius.circular(8)
+                            ),
+                            child: const Text(
                               'Required',
-                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Colors.red),
+                              style: TextStyle(
+                                fontSize: 12, 
+                                fontWeight: FontWeight.w500, 
+                                color: Color(0xFFEF4444)
+                              ),
                             ),
                           ),
                         ],
@@ -132,54 +174,60 @@ class _PermissionScreenState extends ConsumerState<PermissionScreen> {
                   },
                 ),
               ),
+              
               // Security note
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.blue[10],
+                  color: const Color(0xFFF0F9FF),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.blue!, width: 1),
+                  border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.2), width: 1),
                 ),
-                child: Row(
+                child: const Row(
                   children: [
-                    Icon(Icons.security, color: Colors.blue, size: 20),
-                    const SizedBox(width: 12),
+                    Icon(Icons.security, color: Color(0xFF3B82F6), size: 20),
+                    SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         'Your privacy is protected. Permissions can be managed in device settings.',
-                        style: TextStyle(fontSize: 14, color: Colors.blue),
+                        style: TextStyle(fontSize: 14, color: Color(0xFF3B82F6)),
                       ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 24),
-              // Allow All
+              
+              // Allow All Button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _isRequestingPermissions ? null : _requestAllPermissions,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF422F90),
+                    backgroundColor: const Color(0xFF6366F1),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    elevation: 2,
+                    elevation: 0,
+                    disabledBackgroundColor: const Color(0xFF6366F1).withOpacity(0.6),
                   ),
                   child: _isRequestingPermissions
                       ? const Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                      ),
-                      SizedBox(width: 12),
-                      Text('Requesting...'),
-                    ],
-                  )
-                      : const Text('Allow All', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            ),
+                            SizedBox(width: 12),
+                            Text('Requesting...', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                          ],
+                        )
+                      : const Text(
+                          'Allow All', 
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)
+                        ),
                 ),
               ),
             ],
@@ -202,18 +250,17 @@ class _PermissionScreenState extends ConsumerState<PermissionScreen> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('permissions_granted', true);
 
-      // Continue to location accuracy step
-      _navigateToLocationAccuracy();
+      // Continue to lock screen setup (updated flow)
+      _navigateToLockSetup();
     } catch (e) {
-      debugPrint('Permission request error: $e');
       _showPermissionError();
     } finally {
       if (mounted) setState(() => _isRequestingPermissions = false);
     }
   }
 
-  void _navigateToLocationAccuracy() {
-    Navigator.pushReplacementNamed(context, '/location-accuracy');
+  void _navigateToLockSetup() {
+    Navigator.pushReplacementNamed(context, '/app-passcode');
   }
 
   void _showPermissionError() {
@@ -226,7 +273,7 @@ class _PermissionScreenState extends ConsumerState<PermissionScreen> {
           TextButton(
             onPressed: () {
               Navigator.pop(context);
-              _navigateToLocationAccuracy();
+              _navigateToLockSetup();
             },
             child: const Text('Continue'),
           ),

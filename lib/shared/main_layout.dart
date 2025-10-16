@@ -43,8 +43,6 @@ class _MainLayoutState extends State<MainLayout> {
     super.initState();
     _currentIndex = widget.initialIndex;
     _pageController = PageController(initialPage: _currentIndex);
-
-    debugPrint('🎯 MainLayout initialized with index: $_currentIndex');
   }
 
   @override
@@ -91,11 +89,8 @@ class _MainLayoutState extends State<MainLayout> {
   void _onTabTapped(int index) {
     // Validate index range
     if (index < 0 || index >= _pages.length) {
-      debugPrint('❌ Invalid page index: $index (max: ${_pages.length - 1})');
       return;
     }
-
-    debugPrint('🎯 Navigating to page: $index (${_pageTitles[index]})');
 
     if (_currentIndex == index) {
       // Same tab tapped - provide feedback
@@ -134,7 +129,6 @@ class _MainLayoutState extends State<MainLayout> {
   Future<bool> _handleBackPress() async {
     if (_currentIndex != 2) {
       // Go to Dashboard if not already there
-      debugPrint('🔄 Back pressed: Going to Dashboard');
       _onTabTapped(2);
       return false;
     }
@@ -162,14 +156,11 @@ class _MainLayoutState extends State<MainLayout> {
       return false;
     }
 
-    debugPrint('🚪 Exiting app');
     return true; // Exit app
   }
 
   @override
   Widget build(BuildContext context) {
-    debugPrint('🏗️ Building MainLayout with page: ${_pageTitles[_currentIndex]}');
-
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {

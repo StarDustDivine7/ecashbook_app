@@ -147,4 +147,33 @@ class ApiClient {
       "status": status,
     });
   }
+
+  static Future<List<dynamic>> fetchCompanyHolidays({
+    required String empId,
+    required String year,
+    required String secure,
+  }) async {
+    try {
+      final response = await dio.post(
+        ApiConfig.companyHolidays,
+        data: {
+          "empId": empId,
+          "year": year,
+          "secure": secure,
+        },
+      );
+      print("API raw response: ${response.data}");
+      print("API status: ${response.statusCode}");
+      if (response.statusCode == 200 && response.data['success'] == true) {
+        return response.data['data'] as List;
+      }
+      throw Exception('Server returned status code: ${response.statusCode}');
+    } on DioException catch (e) {
+      print("DioException: ${e.message} / ${e.response?.statusCode}");
+      if (e.response?.statusCode == 401) {
+        throw Exception("401 Unauthorized - Token/session expired or invalid.");
+      }
+      throw Exception("API exception: ${e.message}");
+    }
+  }
 }

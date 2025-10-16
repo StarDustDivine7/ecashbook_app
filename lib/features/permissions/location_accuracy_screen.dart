@@ -315,7 +315,7 @@ class _LocationAccuracyScreenState extends ConsumerState<LocationAccuracyScreen>
         setState(() {});
       }
     } catch (e) {
-      debugPrint('Error checking location accuracy: $e');
+      // Silent error handling
     }
   }
 
@@ -335,12 +335,10 @@ class _LocationAccuracyScreenState extends ConsumerState<LocationAccuracyScreen>
           locationSettings: _getLocationSettings(),
         );
 
-        debugPrint('Location obtained: ${position.latitude}, ${position.longitude}');
         _navigateToLogin();
       }
 
     } catch (e) {
-      debugPrint('Location error: $e');
       _showLocationErrorDialog();
     } finally {
       if (mounted) {
