@@ -20,10 +20,10 @@ class PunchInResult {
   PunchInResult({required this.success, required this.message, this.errorCode});
 
   factory PunchInResult.fromJson(Map json) => PunchInResult(
-    success: json['success'] == true,
-    message: (json['message'] ?? '').toString(),
-    errorCode: json['error_code']?.toString(),
-  );
+        success: json['success'] == true,
+        message: (json['message'] ?? '').toString(),
+        errorCode: json['error_code']?.toString(),
+      );
 }
 
 class LunchInResult {
@@ -32,8 +32,9 @@ class LunchInResult {
 
   LunchInResult({required this.success, required this.message});
 
-  factory LunchInResult.fromJson(Map json) =>
-      LunchInResult(success: json['success'] == true, message: (json['message'] ?? '').toString());
+  factory LunchInResult.fromJson(Map json) => LunchInResult(
+      success: json['success'] == true,
+      message: (json['message'] ?? '').toString());
 }
 
 class LunchOutResult {
@@ -42,8 +43,9 @@ class LunchOutResult {
 
   LunchOutResult({required this.success, required this.message});
 
-  factory LunchOutResult.fromJson(Map json) =>
-      LunchOutResult(success: json['success'] == true, message: (json['message'] ?? '').toString());
+  factory LunchOutResult.fromJson(Map json) => LunchOutResult(
+      success: json['success'] == true,
+      message: (json['message'] ?? '').toString());
 }
 
 class BreakResult {
@@ -52,8 +54,9 @@ class BreakResult {
 
   BreakResult({required this.success, required this.message});
 
-  factory BreakResult.fromJson(Map json) =>
-      BreakResult(success: json['success'] == true, message: (json['message'] ?? '').toString());
+  factory BreakResult.fromJson(Map json) => BreakResult(
+      success: json['success'] == true,
+      message: (json['message'] ?? '').toString());
 }
 
 class PunchOutResult {
@@ -64,10 +67,10 @@ class PunchOutResult {
   PunchOutResult({required this.success, required this.message, this.data});
 
   factory PunchOutResult.fromJson(Map json) => PunchOutResult(
-    success: json['success'] == true,
-    message: (json['message'] ?? '').toString(),
-    data: (json['data'] is Map) ? Map.from(json['data'] as Map) : null,
-  );
+        success: json['success'] == true,
+        message: (json['message'] ?? '').toString(),
+        data: (json['data'] is Map) ? Map.from(json['data'] as Map) : null,
+      );
 }
 
 class AuthResult {
@@ -78,7 +81,13 @@ class AuthResult {
   final String? secure;
   final User? user;
 
-  AuthResult({required this.success, this.message, this.token, this.tokenType, this.secure, this.user});
+  AuthResult(
+      {required this.success,
+      this.message,
+      this.token,
+      this.tokenType,
+      this.secure,
+      this.user});
 }
 
 class LogoutResult {
@@ -88,24 +97,24 @@ class LogoutResult {
   final bool isUnauthorized;
 
   LogoutResult({
-    required this.success, 
-    required this.message, 
+    required this.success,
+    required this.message,
     this.errorCode,
     this.isUnauthorized = false,
   });
 
   factory LogoutResult.fromJson(Map json) => LogoutResult(
-    success: json['success'] == true,
-    message: (json['message'] ?? '').toString(),
-    errorCode: json['error_code']?.toString(),
-  );
+        success: json['success'] == true,
+        message: (json['message'] ?? '').toString(),
+        errorCode: json['error_code']?.toString(),
+      );
 
   factory LogoutResult.unauthorized() => LogoutResult(
-    success: false,
-    message: 'Unauthorized access. Invalid or expired token.',
-    errorCode: 'TOKEN_MISMATCH',
-    isUnauthorized: true,
-  );
+        success: false,
+        message: 'Unauthorized access. Invalid or expired token.',
+        errorCode: 'TOKEN_MISMATCH',
+        isUnauthorized: true,
+      );
 }
 
 class AuthService {
@@ -187,14 +196,14 @@ class AuthService {
     await p.remove(_kSecure);
     await p.remove(_kUser);
     await p.remove(_kDeviceToken);
-    
+
     // Clear app state
     await p.remove('user_logged_in');
     await p.remove('app_was_backgrounded');
     await p.remove('app_paused_time');
     await p.remove('pin_attempt_count');
     await p.remove('last_app_close_time');
-    
+
     // Keep these for app functionality
     // - is_first_time (for onboarding)
     // - onboarding_completed
@@ -204,7 +213,8 @@ class AuthService {
     // - app_passcode_hash (PIN)
   }
 
-  static Future<bool> isSessionActive({Duration timeout = const Duration(minutes: 120)}) async {
+  static Future<bool> isSessionActive(
+      {Duration timeout = const Duration(minutes: 120)}) async {
     final p = await SharedPreferences.getInstance();
     final ts = p.getInt(_kLastAuth) ?? 0;
     return DateTime.now().millisecondsSinceEpoch - ts < timeout.inMilliseconds;
@@ -241,7 +251,10 @@ class AuthService {
   static Future<Map<String, String>> _authHeaders() async {
     final token = await getAuthToken();
     final type = await getTokenType() ?? 'Bearer';
-    final Map<String, String> h = {'Content-Type': 'application/json', 'Accept': 'application/json'};
+    final Map<String, String> h = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
     if (token != null && token.isNotEmpty) h['Authorization'] = '$type $token';
     return h;
   }
@@ -261,7 +274,8 @@ class AuthService {
     if (status == 401) return 'Unauthorized';
     try {
       final data = e.response?.data;
-      if (data is Map && data['message'] != null) return data['message'].toString();
+      if (data is Map && data['message'] != null)
+        return data['message'].toString();
     } catch (_) {}
     return 'Network error';
   }
@@ -269,19 +283,21 @@ class AuthService {
   // Check if response indicates unauthorized access
   static bool isUnauthorizedResponse(dynamic responseData, int? statusCode) {
     if (statusCode == 401) return true;
-    
+
     if (responseData is Map) {
       final success = responseData['success'];
       final errorCode = responseData['error_code']?.toString();
       final message = responseData['message']?.toString() ?? '';
-      
-      return success == false && 
-             (errorCode == 'TOKEN_MISMATCH' || 
+
+      return success == false &&
+          (errorCode == 'TOKEN_MISMATCH' ||
               message.toLowerCase().contains('unauthorized') ||
-              message.toLowerCase().contains('invalid') && message.toLowerCase().contains('token') ||
-              message.toLowerCase().contains('expired') && message.toLowerCase().contains('token'));
+              message.toLowerCase().contains('invalid') &&
+                  message.toLowerCase().contains('token') ||
+              message.toLowerCase().contains('expired') &&
+                  message.toLowerCase().contains('token'));
     }
-    
+
     return false;
   }
 
@@ -317,7 +333,8 @@ class AuthService {
       if (resp.statusCode == 200) {
         final Map<String, dynamic> map = resp.data is Map
             ? Map<String, dynamic>.from(resp.data as Map)
-            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+            : Map<String, dynamic>.from(
+                json.decode(resp.data as String) as Map);
 
         final login = LoginResponse.fromJson(map);
         if (!login.success) {
@@ -353,7 +370,7 @@ class AuthService {
       final headers = await _authHeaders();
       final user = await getSavedUser();
       final secure = await getSecure();
-      
+
       if (user == null || secure == null) {
         // No user data, treat as successful logout
         await clearAllAppData();
@@ -370,7 +387,8 @@ class AuthService {
         data: jsonEncode(body),
         options: Options(
           headers: headers,
-          validateStatus: (status) => status != null && status < 500, // Accept all non-server errors
+          validateStatus: (status) =>
+              status != null && status < 500, // Accept all non-server errors
         ),
       );
 
@@ -385,30 +403,29 @@ class AuthService {
           : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
 
       final result = LogoutResult.fromJson(map);
-      
+
       // Clear app data regardless of API response for logout
       await clearAllAppData();
-      
+
       return result;
-      
     } on DioException catch (e) {
       // Handle network errors
       if (e.response?.statusCode == 401) {
         await clearAllAppData();
         return LogoutResult.unauthorized();
       }
-      
+
       // For other errors, still clear data and return error
       await clearAllAppData();
       return LogoutResult(
-        success: false, 
+        success: false,
         message: _handleNetworkError(e),
       );
     } catch (e) {
       // For any other errors, clear data and return generic error
       await clearAllAppData();
       return LogoutResult(
-        success: false, 
+        success: false,
         message: 'Logout failed: ${e.toString()}',
       );
     }
@@ -425,8 +442,11 @@ class AuthService {
     final resp = await ApiClient.dio.post(
       ApiConfig.employeeDetails,
       data: jsonEncode(body),
-      options: Options(headers: headers),
+      options: Options(headers: headers, validateStatus: (s) => true),
     );
+    if (resp.statusCode == 401) {
+      throw Exception('401 Unauthorized - Token/session expired or invalid.');
+    }
     final Map<String, dynamic> map = resp.data is Map
         ? Map<String, dynamic>.from(resp.data as Map)
         : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
@@ -462,7 +482,8 @@ class AuthService {
       if (resp.statusCode == 409) {
         final Map<String, dynamic> m = resp.data is Map
             ? Map<String, dynamic>.from(resp.data as Map)
-            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+            : Map<String, dynamic>.from(
+                json.decode(resp.data as String) as Map);
         return PunchInResult(
           success: false,
           message: (m['message'] ?? 'Already punched in for today.').toString(),
@@ -472,7 +493,8 @@ class AuthService {
       try {
         final Map<String, dynamic> map = resp.data is Map
             ? Map<String, dynamic>.from(resp.data as Map)
-            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+            : Map<String, dynamic>.from(
+                json.decode(resp.data as String) as Map);
         return PunchInResult.fromJson(map);
       } on FormatException {
         return PunchInResult(
@@ -496,7 +518,12 @@ class AuthService {
   }) async {
     try {
       final headers = await _authHeaders();
-      final body = {'todayDate': todayDate, 'lunchInTime': lunchInTime, 'empId': empId, 'secure': secure};
+      final body = {
+        'todayDate': todayDate,
+        'lunchInTime': lunchInTime,
+        'empId': empId,
+        'secure': secure
+      };
       final resp = await ApiClient.dio.post(
         ApiConfig.lunchIn,
         data: jsonEncode(body),
@@ -505,7 +532,8 @@ class AuthService {
       try {
         final Map<String, dynamic> map = resp.data is Map
             ? Map<String, dynamic>.from(resp.data as Map)
-            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+            : Map<String, dynamic>.from(
+                json.decode(resp.data as String) as Map);
         return LunchInResult.fromJson(map);
       } on FormatException {
         return LunchInResult(
@@ -529,7 +557,12 @@ class AuthService {
   }) async {
     try {
       final headers = await _authHeaders();
-      final body = {'todayDate': todayDate, 'lunchOutTime': lunchOutTime, 'empId': empId, 'secure': secure};
+      final body = {
+        'todayDate': todayDate,
+        'lunchOutTime': lunchOutTime,
+        'empId': empId,
+        'secure': secure
+      };
       final resp = await ApiClient.dio.post(
         ApiConfig.lunchOut,
         data: jsonEncode(body),
@@ -538,7 +571,8 @@ class AuthService {
       try {
         final Map<String, dynamic> map = resp.data is Map
             ? Map<String, dynamic>.from(resp.data as Map)
-            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+            : Map<String, dynamic>.from(
+                json.decode(resp.data as String) as Map);
         return LunchOutResult.fromJson(map);
       } on FormatException {
         return LunchOutResult(
@@ -562,7 +596,12 @@ class AuthService {
   }) async {
     try {
       final headers = await _authHeaders();
-      final body = {'break_date': breakDate, 'break_in': breakInTime, 'empId': empId, 'secure': secure};
+      final body = {
+        'break_date': breakDate,
+        'break_in': breakInTime,
+        'empId': empId,
+        'secure': secure
+      };
       final resp = await ApiClient.dio.post(
         ApiConfig.breakIn,
         data: jsonEncode(body),
@@ -571,7 +610,8 @@ class AuthService {
       try {
         final Map<String, dynamic> map = resp.data is Map
             ? Map<String, dynamic>.from(resp.data as Map)
-            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+            : Map<String, dynamic>.from(
+                json.decode(resp.data as String) as Map);
         return BreakResult.fromJson(map);
       } on FormatException {
         return BreakResult(
@@ -595,7 +635,12 @@ class AuthService {
   }) async {
     try {
       final headers = await _authHeaders();
-      final body = {'break_date': breakDate, 'breakOutTime': breakOutTime, 'empId': empId, 'secure': secure};
+      final body = {
+        'break_date': breakDate,
+        'breakOutTime': breakOutTime,
+        'empId': empId,
+        'secure': secure
+      };
       final resp = await ApiClient.dio.post(
         ApiConfig.breakOut,
         data: jsonEncode(body),
@@ -604,7 +649,8 @@ class AuthService {
       try {
         final Map<String, dynamic> map = resp.data is Map
             ? Map<String, dynamic>.from(resp.data as Map)
-            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+            : Map<String, dynamic>.from(
+                json.decode(resp.data as String) as Map);
         return BreakResult.fromJson(map);
       } on FormatException {
         return BreakResult(
@@ -639,10 +685,12 @@ class AuthService {
         data: jsonEncode(body),
         options: Options(headers: headers, validateStatus: (c) => true),
       );
+      print(resp.data);
       try {
         final Map<String, dynamic> map = resp.data is Map
             ? Map<String, dynamic>.from(resp.data as Map)
-            : Map<String, dynamic>.from(json.decode(resp.data as String) as Map);
+            : Map<String, dynamic>.from(
+                json.decode(resp.data as String) as Map);
         return PunchOutResult.fromJson(map);
       } on FormatException {
         return PunchOutResult(

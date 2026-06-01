@@ -6,7 +6,7 @@ import '../../core/models/holiday_model.dart';
 import '../../core/models/daily_activity_model.dart';
 import '../../core/services/auth_service.dart';
 import '../../core/services/attendance_service.dart';
-import '../../core/network/api_client.dart';
+import '../../core/api/api_client.dart';
 
 class AttendancePage extends StatefulWidget {
   const AttendancePage({super.key});
@@ -15,7 +15,8 @@ class AttendancePage extends StatefulWidget {
   State<AttendancePage> createState() => _AttendancePageState();
 }
 
-class _AttendancePageState extends State<AttendancePage> with TickerProviderStateMixin {
+class _AttendancePageState extends State<AttendancePage>
+    with TickerProviderStateMixin {
   late DateTime _selectedDay;
   late DateTime _focusedDay;
   late AnimationController _slideController;
@@ -35,9 +36,7 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
 
   // Map of Date to attendance status string from API
   Map<DateTime, String> _attendanceStatus = {};
-  
 
-  
   // Summary data from API
   Map<String, int> _attendanceSummary = {};
 
@@ -50,19 +49,19 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
   @override
   void initState() {
     super.initState();
-    
+
     // Initialize dates properly - normalize to date only (no time)
     final now = DateTime.now();
     _selectedDay = DateTime(now.year, now.month, now.day);
     _focusedDay = DateTime(now.year, now.month, now.day);
-    
+
     _slideController = AnimationController(
       duration: const Duration(milliseconds: 400),
       vsync: this,
     );
     _slideController.forward();
     _fetchAttendanceFromApi();
-    
+
     // Fetch today's activity since today's date is selected by default
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchDailyActivity(_selectedDay);
@@ -84,7 +83,9 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
   }
 
   Future<void> _fetchAttendanceFromApi() async {
-    setState(() { _loadingAttendance = true; });
+    setState(() {
+      _loadingAttendance = true;
+    });
     try {
       final user = await AuthService.getSavedUser();
       if (user?.employeeId == null) return;
@@ -96,8 +97,8 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
         month: _focusedDay,
         secure: secure,
       );
-      
-      setState(() { 
+
+      setState(() {
         _attendanceStatus = result['statusMap'] as Map<DateTime, String>;
         _attendanceSummary = result['summary'] as Map<String, int>;
       });
@@ -106,57 +107,141 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
         _showErrorSnackbar('Failed to load attendance data: ${e.toString()}');
       }
     } finally {
-      setState(() { _loadingAttendance = false; });
+      setState(() {
+        _loadingAttendance = false;
+      });
     }
   }
 
   Future<void> _showHolidayModal() async {
     if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(
-        child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(_primaryPurple),
+
+    // Show loading indicator
+    bool isLoadingOverlayShown = true;
+
+    // Dismiss any existing dialogs first
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true)
+          .popUntil((route) => route.isFirst);
+
+      // Show new loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => WillPopScope(
+          onWillPop: () async => false,
+          child: const Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(_primaryPurple),
+            ),
+          ),
         ),
-      ),
-    );
+      ).then((_) {
+        isLoadingOverlayShown = false;
+      });
+    }
 
     try {
       final user = await AuthService.getSavedUser();
       if (user == null || user.employeeId.isEmpty) {
         if (mounted) {
-          Navigator.pop(context);
+          Navigator.pop(context); // Remove loading
           _showErrorSnackbar('Please login again to continue');
         }
         return;
       }
+
       final secure = await AuthService.getSecure();
       if (secure == null || secure.isEmpty) {
         if (mounted) {
-          Navigator.pop(context);
+          Navigator.pop(context); // Remove loading
           _showErrorSnackbar('Session expired. Please login again');
         }
         return;
       }
 
-      final holidayData = await ApiClient.fetchCompanyHolidays(
-        empId: user.employeeId,
-        year: DateTime.now().year.toString(),
-        secure: secure,
-      );
+      try {
+        final holidayData = await ApiClient.fetchCompanyHolidays(
+          empId: user.employeeId,
+          year: _focusedDay.year.toString(),
+          secure: secure,
+        );
 
-      if (!mounted) return;
-      Navigator.pop(context);
+        if (!mounted) return;
 
-      if (holidayData.isEmpty) {
-        _showInfoSnackbar('No holidays found for this year');
+        // Dismiss loading dialog if it's still shown
+        if (isLoadingOverlayShown && context.mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+          isLoadingOverlayShown = false;
+        }
+
+        if (holidayData == null) {
+          _showInfoSnackbar('No holiday data received from server');
+          return;
+        }
+
+        if (holidayData is String) {
+          // If the API returns an error message
+          _showErrorSnackbar('Error: $holidayData');
+          return;
+        }
+
+        if (holidayData.isEmpty) {
+          _showInfoSnackbar('No holidays found for this year');
+          return;
+        }
+
+        // Log the raw data for debugging
+        debugPrint('Holiday Data: $holidayData');
+
+        // Show the bottom sheet with the data
+        _showHolidayList(holidayData);
+      } catch (e, stackTrace) {
+        debugPrint('Error fetching holidays: $e');
+        debugPrint('Stack trace: $stackTrace');
+        if (mounted) {
+          if (isLoadingOverlayShown) {
+            Navigator.of(context, rootNavigator: true).pop();
+            isLoadingOverlayShown = false;
+          }
+          _showErrorSnackbar('Error loading holidays: ${e.toString()}');
+        }
+      }
+    } catch (e, stackTrace) {
+      debugPrint('Unexpected error: $e');
+      debugPrint('Stack trace: $stackTrace');
+      if (mounted) {
+        if (isLoadingOverlayShown) {
+          Navigator.of(context, rootNavigator: true).pop();
+          isLoadingOverlayShown = false;
+        }
+        _showErrorSnackbar('An unexpected error occurred');
+      }
+    }
+  }
+
+  // Helper method to show the holiday list
+  void _showHolidayList(dynamic holidayData) {
+    try {
+      final holidays = (holidayData as List)
+          .map<Holiday?>((e) {
+            try {
+              if (e is Map) {
+                return Holiday.fromJson(Map<String, dynamic>.from(e));
+              }
+              return null;
+            } catch (e) {
+              debugPrint('Error parsing holiday item: $e');
+              return null;
+            }
+          })
+          .whereType<Holiday>()
+          .toList();
+
+      if (holidays.isEmpty) {
+        _showInfoSnackbar('No valid holiday data available');
         return;
       }
-
-      final holidays = holidayData
-          .map<Holiday>((e) => Holiday.fromJson(Map<String, dynamic>.from(e)))
-          .toList();
 
       showModalBottomSheet(
         context: context,
@@ -206,7 +291,8 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: _accentOrange.withOpacity(0.15),
                         borderRadius: BorderRadius.circular(12),
@@ -229,8 +315,7 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
                     itemCount: holidays.length,
                     itemBuilder: (context, index) {
                       final holiday = holidays[index];
-                      final date = DateFormat("dd MMM yyyy")
-                          .format(DateFormat("yyyy-MM-dd").parse(holiday.holidayDate));
+                      final date = _formatHolidayDate(holiday.holidayDate);
 
                       final isNational = holiday.holidayType
                           .toLowerCase()
@@ -284,7 +369,9 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,
-                                      color: isNational ? _errorRed : _accentOrange,
+                                      color: isNational
+                                          ? _errorRed
+                                          : _accentOrange,
                                     ),
                                   ),
                                 ),
@@ -309,35 +396,80 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
           );
         },
       );
+    } catch (e, stackTrace) {
+      debugPrint('Error showing holiday list: $e');
+      debugPrint('Stack trace: $stackTrace');
+      _showErrorSnackbar('Error displaying holiday data');
+    }
+  }
+
+  // Helper method to safely format dates
+  String _formatHolidayDate(String? dateString) {
+    if (dateString == null || dateString.isEmpty) {
+      return 'Date not available';
+    }
+
+    try {
+      // First try parsing as ISO format
+      DateTime? date = DateTime.tryParse(dateString);
+
+      // If that fails, try parsing with specific format
+      if (date == null) {
+        try {
+          date = DateFormat("yyyy-MM-dd").parse(dateString);
+        } catch (_) {
+          // If we can't parse it, return the original string
+          return dateString;
+        }
+      }
+
+      return DateFormat("dd MMM yyyy").format(date);
     } catch (e) {
-      if (!mounted) return;
-      Navigator.pop(context);
-      _showErrorSnackbar("Failed to fetch holidays: ${e.toString()}");
+      debugPrint('Error formatting date: $e');
+      return dateString; // Return original string if we can't format it
     }
   }
 
   void _showErrorSnackbar(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red),
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(10),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
     );
   }
 
   void _showInfoSnackbar(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.blue),
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: Colors.blue,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(10),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
     );
   }
 
   void _handleDaySelection(DateTime selectedDay, DateTime focusedDay) {
     // Normalize dates to date only (no time components)
-    final normalizedSelectedDay = DateTime(selectedDay.year, selectedDay.month, selectedDay.day);
-    final normalizedFocusedDay = DateTime(focusedDay.year, focusedDay.month, focusedDay.day);
-    
+    final normalizedSelectedDay =
+        DateTime(selectedDay.year, selectedDay.month, selectedDay.day);
+    final normalizedFocusedDay =
+        DateTime(focusedDay.year, focusedDay.month, focusedDay.day);
+
     // Always fetch daily activity, even if it's the same date
     _fetchDailyActivity(normalizedSelectedDay);
-    
+
     setState(() {
       _selectedDay = normalizedSelectedDay;
       _focusedDay = normalizedFocusedDay;
@@ -348,7 +480,7 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
 
   Future<void> _fetchDailyActivity(DateTime selectedDate) async {
     if (!mounted) return;
-    
+
     setState(() {
       _loadingDailyActivity = true;
       _selectedDayActivity = null;
@@ -362,7 +494,7 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
         }
         return;
       }
-      
+
       final secure = await AuthService.getSecure();
       if (secure == null || secure.isEmpty) {
         if (mounted) {
@@ -387,9 +519,9 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
         setState(() {
           _selectedDayActivity = null;
         });
-        _showInfoSnackbar(dailyActivity?.message ?? 'No activity data found for this date');
+        _showInfoSnackbar(
+            dailyActivity?.message ?? 'No activity data found for this date');
       }
-
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -404,8 +536,6 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
       }
     }
   }
-
-
 
   Color _getStatusColor(String status) {
     switch (status.toLowerCase()) {
@@ -453,8 +583,8 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
             backgroundColor: _accentOrange,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(vertical: 12),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             elevation: 2,
           ),
         ),
@@ -464,7 +594,7 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
 
   Widget _buildAttendanceSummaryCard() {
     if (_attendanceSummary.isEmpty) return const SizedBox.shrink();
-    
+
     return Container(
       margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
       decoration: BoxDecoration(
@@ -583,7 +713,8 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
     );
   }
 
-  Widget _buildSummaryItem(String label, String count, Color color, IconData icon) {
+  Widget _buildSummaryItem(
+      String label, String count, Color color, IconData icon) {
     return Container(
       padding: const EdgeInsets.all(12),
       margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -617,7 +748,6 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
     );
   }
 
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -625,33 +755,33 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
       body: _loadingAttendance
           ? const Center(child: CircularProgressIndicator())
           : CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: Column(
-              children: [
-                _buildHolidayButton(),
-                _buildAttendanceSummaryCard(),
-                _buildCalendarCard(),
+              slivers: [
+                SliverToBoxAdapter(
+                  child: Column(
+                    children: [
+                      _buildHolidayButton(),
+                      _buildAttendanceSummaryCard(),
+                      _buildCalendarCard(),
+                    ],
+                  ),
+                ),
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: AnimatedBuilder(
+                    animation: _slideController,
+                    builder: (context, child) {
+                      return Transform.translate(
+                        offset: Offset(0, (1 - _slideController.value) * 50),
+                        child: Opacity(
+                          opacity: _slideController.value,
+                          child: _buildDayDetailsCard(),
+                        ),
+                      );
+                    },
+                  ),
+                ),
               ],
             ),
-          ),
-          SliverFillRemaining(
-            hasScrollBody: false,
-            child: AnimatedBuilder(
-              animation: _slideController,
-              builder: (context, child) {
-                return Transform.translate(
-                  offset: Offset(0, (1 - _slideController.value) * 50),
-                  child: Opacity(
-                    opacity: _slideController.value,
-                    child: _buildDayDetailsCard(),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -730,7 +860,8 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
                 ),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: _accentGreen.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(12),
@@ -747,46 +878,61 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
               ],
             ),
           ),
-
           Padding(
             padding: const EdgeInsets.all(16),
             child: TableCalendar<String>(
+              //physics: const NeverScrollableScrollPhysics(),
+              availableGestures: AvailableGestures.horizontalSwipe,
               firstDay: DateTime(_focusedDay.year, 1, 1),
               lastDay: DateTime(_focusedDay.year, 12, 31),
               focusedDay: _focusedDay,
-              selectedDayPredicate: (day) => isSameDay(day, _selectedDay), // Enable proper selection
+              selectedDayPredicate: (day) =>
+                  isSameDay(day, _selectedDay), // Enable proper selection
               enabledDayPredicate: (day) => !day.isAfter(DateTime.now()),
               eventLoader: (day) {
-                final status = _attendanceStatus[DateTime(day.year, day.month, day.day)];
+                final status =
+                    _attendanceStatus[DateTime(day.year, day.month, day.day)];
                 return status == null ? [] : [status];
               },
               //-------- Full date number colored-------
               calendarBuilders: CalendarBuilders(
                 defaultBuilder: (context, date, _) {
-                  final status = _attendanceStatus[DateTime(date.year, date.month, date.day)];
+                  final status = _attendanceStatus[
+                      DateTime(date.year, date.month, date.day)];
                   final isDisabled = date.isAfter(DateTime.now());
                   final isToday = isSameDay(date, DateTime.now());
                   final isSelected = isSameDay(date, _selectedDay);
-                  
+
                   // Determine base color from attendance status
                   Color numberColor;
                   if (status == null) {
                     numberColor = _textDark;
                   } else {
                     switch (status) {
-                      case 'present': numberColor = _accentGreen; break;
-                      case 'absent': numberColor = _errorRed; break;
-                      case 'leave': numberColor = _accentOrange; break;
-                      case 'office off': numberColor = Colors.black; break;
-                      case 'holiday': numberColor = _accentBlue; break;
-                      default: numberColor = Colors.grey;
+                      case 'present':
+                        numberColor = _accentGreen;
+                        break;
+                      case 'absent':
+                        numberColor = _errorRed;
+                        break;
+                      case 'leave':
+                        numberColor = _accentOrange;
+                        break;
+                      case 'office off':
+                        numberColor = Colors.black;
+                        break;
+                      case 'holiday':
+                        numberColor = _accentBlue;
+                        break;
+                      default:
+                        numberColor = Colors.grey;
                     }
                   }
 
                   // Determine decoration and text color based on state
                   BoxDecoration decoration;
                   Color textColor;
-                  
+
                   if (isSelected) {
                     // Selected date - use purple gradient (this includes today if selected)
                     decoration = BoxDecoration(
@@ -816,9 +962,11 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
                   }
 
                   return GestureDetector(
-                    onTap: isDisabled ? null : () {
-                      _handleDaySelection(date, _focusedDay);
-                    },
+                    onTap: isDisabled
+                        ? null
+                        : () {
+                            _handleDaySelection(date, _focusedDay);
+                          },
                     child: Container(
                       decoration: decoration,
                       child: Center(
@@ -834,11 +982,12 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
                     ),
                   );
                 },
-                
+
                 // Add selected day builder to ensure proper selection highlighting
                 selectedBuilder: (context, date, _) {
-                  final status = _attendanceStatus[DateTime(date.year, date.month, date.day)];
-                  
+                  final status = _attendanceStatus[
+                      DateTime(date.year, date.month, date.day)];
+
                   return Container(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -860,30 +1009,63 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
                     ),
                   );
                 },
-                
+
                 // Add today builder to ensure today is highlighted when not selected
                 todayBuilder: (context, date, _) {
-                  final status = _attendanceStatus[DateTime(date.year, date.month, date.day)];
+                  final status = _attendanceStatus[
+                      DateTime(date.year, date.month, date.day)];
                   final isSelected = isSameDay(date, _selectedDay);
-                  
-                  // If today is selected, let selectedBuilder handle it
-                  if (isSelected) return null;
-                  
+
+                  // If today is selected, show the selected styling here
+                  if (isSelected) {
+                    return Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [_primaryPurple, _primaryDark],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '${date.day}',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
                   // Determine base color from attendance status
                   Color numberColor;
                   if (status == null) {
                     numberColor = _accentOrange;
                   } else {
                     switch (status) {
-                      case 'present': numberColor = _accentGreen; break;
-                      case 'absent': numberColor = _errorRed; break;
-                      case 'leave': numberColor = _accentOrange; break;
-                      case 'office off': numberColor = Colors.black; break;
-                      case 'holiday': numberColor = _accentBlue; break;
-                      default: numberColor = _accentOrange;
+                      case 'present':
+                        numberColor = _accentGreen;
+                        break;
+                      case 'absent':
+                        numberColor = _errorRed;
+                        break;
+                      case 'leave':
+                        numberColor = _accentOrange;
+                        break;
+                      case 'office off':
+                        numberColor = Colors.black;
+                        break;
+                      case 'holiday':
+                        numberColor = _accentBlue;
+                        break;
+                      default:
+                        numberColor = _accentOrange;
                     }
                   }
-                  
+
                   return Container(
                     decoration: BoxDecoration(
                       color: Colors.transparent,
@@ -903,7 +1085,6 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
                   );
                 },
               ),
-
 
               //----- Small colored dot below the date number ----
               // calendarBuilders: CalendarBuilders(
@@ -1014,9 +1195,13 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
               ),
               daysOfWeekStyle: const DaysOfWeekStyle(
                 weekdayStyle: TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF64748B)),
                 weekendStyle: TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF64748B)),
               ),
             ),
           ),
@@ -1037,7 +1222,7 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
     // Check if the selected day is in the future
     final isToday = isSameDay(_selectedDay, DateTime.now());
     final isFuture = _selectedDay.isAfter(DateTime.now());
-    
+
     if (isFuture) {
       return Container(
         padding: const EdgeInsets.all(20),
@@ -1069,7 +1254,8 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
               Text(
                 'Select a past or current date to view attendance details.',
                 textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: _textLight.withOpacity(0.7)),
+                style:
+                    TextStyle(fontSize: 12, color: _textLight.withOpacity(0.7)),
               ),
             ],
           ),
@@ -1134,9 +1320,9 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
               Icon(Icons.info_outline_rounded, size: 40, color: _textLight),
               const SizedBox(height: 12),
               Text(
-                isToday 
-                  ? 'No attendance data for today yet.'
-                  : 'No attendance data for ${DateFormat('dd MMM yyyy').format(_selectedDay)}.',
+                isToday
+                    ? 'No attendance data for today yet.'
+                    : 'No attendance data for ${DateFormat('dd MMM yyyy').format(_selectedDay)}.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 14, color: _textLight),
               ),
@@ -1147,7 +1333,7 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
     }
 
     final data = _selectedDayActivity!;
-    
+
     return Container(
       padding: const EdgeInsets.all(20),
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
@@ -1163,171 +1349,212 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Header
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: _getStatusColor(data.status).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  _getStatusIcon(data.status), 
-                  size: 18, 
-                  color: _getStatusColor(data.status)
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+      child: data.workingHours == null
+          ? Column(
+              children: [
+                Text(
+                    " ${DateFormat('dd MMM yyyy').format(_selectedDay)} You are not login",
+                    style: const TextStyle(fontSize: 15, color: Colors.black)),
+                Text("Please contact to your manager.",
+                    style: const TextStyle(fontSize: 13, color: _textLight)),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header
+                Row(
                   children: [
-                    Text(
-                      'Details for ${DateFormat('dd MMM yyyy').format(_selectedDay)}',
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _textDark),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: _getStatusColor(data.status).withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(_getStatusIcon(data.status),
+                          size: 18, color: _getStatusColor(data.status)),
                     ),
-                    Text(
-                      '${data.dayName} • ${data.status.toUpperCase()}',
-                      style: const TextStyle(fontSize: 12, color: _textLight),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Details for ${DateFormat('dd MMM yyyy').format(_selectedDay)}',
+                            style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: _textDark),
+                          ),
+                          Text(
+                            '${data.dayName} • ${data.status.toUpperCase()}',
+                            style: const TextStyle(
+                                fontSize: 12, color: _textLight),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: _errorRed.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        data.status.toUpperCase(),
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: _getStatusColor(data.status),
+                        ),
+                      ),
                     ),
                   ],
                 ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _errorRed.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  data.status.toUpperCase(),
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: _getStatusColor(data.status),
+
+                const Divider(height: 24, thickness: 1, color: _borderColor),
+
+                // Timing Details
+                _buildTimingRow('In Time:', data.inTime ?? '--:--',
+                    Icons.login_rounded, _accentGreen),
+                _buildTimingRow('Out Time:', data.outTime ?? '--:--',
+                    Icons.logout_rounded, _errorRed),
+                _buildInfoRow('Working Hours:', data.workingHours ?? '0h 0m',
+                    Icons.hourglass_bottom_rounded),
+
+                if (data.isLate && data.lateBy != null) ...[
+                  const SizedBox(height: 4),
+                  _buildInfoRow('Late By:', data.lateBy!, Icons.warning_rounded,
+                      isWarning: true),
+                ],
+
+                // Office Hours
+                const SizedBox(height: 8),
+                _buildInfoRow(
+                    'Office Hours:',
+                    '${data.openingTime} - ${data.closingTime}',
+                    Icons.business_rounded),
+                _buildInfoRow('Work Location:', data.workLocationStatus,
+                    Icons.location_on_rounded),
+
+                // Lunch Section
+                if (data.lunchIn != null ||
+                    data.lunchOut != null ||
+                    data.lunchStatus.isNotEmpty) ...[
+                  const Divider(height: 24, thickness: 1, color: _borderColor),
+                  _buildSectionTitle('Lunch Break', Icons.restaurant_rounded),
+                  const SizedBox(height: 8),
+                  _buildInfoRow('Lunch In:', data.lunchIn ?? 'Not started',
+                      Icons.restaurant_rounded),
+                  _buildInfoRow('Lunch Out:', data.lunchOut ?? 'Ongoing',
+                      Icons.restaurant_rounded),
+                  _buildInfoRow('Status:', data.lunchStatus.toUpperCase(),
+                      Icons.info_rounded),
+                  if (data.totalLunchTime != null)
+                    _buildInfoRow('Total Time:', data.totalLunchTime!,
+                        Icons.timer_rounded),
+                ],
+
+                // Breaks Section
+                if (data.breaks.entries.isNotEmpty) ...[
+                  const Divider(height: 24, thickness: 1, color: _borderColor),
+                  _buildSectionTitle('Breaks', Icons.coffee_rounded),
+                  const SizedBox(height: 8),
+                  _buildInfoRow('Total Break Time:', data.breaks.totalBreakTime,
+                      Icons.coffee_rounded),
+                  ...data.breaks.entries.map(
+                    (breakEntry) => _buildInfoRow(
+                        'Break:',
+                        '${breakEntry.breakIn ?? 'Started'} - ${breakEntry.breakOut ?? 'Ongoing'}',
+                        Icons.pause_circle_rounded),
                   ),
-                ),
-              ),
-            ],
-          ),
-          
-          const Divider(height: 24, thickness: 1, color: _borderColor),
-          
-          // Timing Details
-          _buildTimingRow('In Time:', data.inTime ?? '--:--', Icons.login_rounded, _accentGreen),
-          _buildTimingRow('Out Time:', data.outTime ?? '--:--', Icons.logout_rounded, _errorRed),
-          _buildInfoRow('Working Hours:', data.workingHours ?? '0h 0m', Icons.hourglass_bottom_rounded),
-          
-          if (data.isLate && data.lateBy != null) ...[
-            const SizedBox(height: 4),
-            _buildInfoRow('Late By:', data.lateBy!, Icons.warning_rounded, isWarning: true),
-          ],
-          
-          // Office Hours
-          const SizedBox(height: 8),
-          _buildInfoRow('Office Hours:', '${data.openingTime} - ${data.closingTime}', Icons.business_rounded),
-          _buildInfoRow('Work Location:', data.workLocationStatus, Icons.location_on_rounded),
-          
-          // Lunch Section
-          if (data.lunchIn != null || data.lunchOut != null || data.lunchStatus.isNotEmpty) ...[
-            const Divider(height: 24, thickness: 1, color: _borderColor),
-            _buildSectionTitle('Lunch Break', Icons.restaurant_rounded),
-            const SizedBox(height: 8),
-            _buildInfoRow('Lunch In:', data.lunchIn ?? 'Not started', Icons.restaurant_rounded),
-            _buildInfoRow('Lunch Out:', data.lunchOut ?? 'Ongoing', Icons.restaurant_rounded),
-            _buildInfoRow('Status:', data.lunchStatus.toUpperCase(), Icons.info_rounded),
-            if (data.totalLunchTime != null)
-              _buildInfoRow('Total Time:', data.totalLunchTime!, Icons.timer_rounded),
-          ],
-          
-          // Breaks Section
-          if (data.breaks.entries.isNotEmpty) ...[
-            const Divider(height: 24, thickness: 1, color: _borderColor),
-            _buildSectionTitle('Breaks', Icons.coffee_rounded),
-            const SizedBox(height: 8),
-            _buildInfoRow('Total Break Time:', data.breaks.totalBreakTime, Icons.coffee_rounded),
-            ...data.breaks.entries.map((breakEntry) => 
-              _buildInfoRow(
-                'Break:', 
-                '${breakEntry.breakIn ?? 'Started'} - ${breakEntry.breakOut ?? 'Ongoing'}',
-                Icons.pause_circle_rounded
-              ),
+                ],
+
+                // Task History Section
+                if (data.taskHistory.isNotEmpty) ...[
+                  const Divider(height: 24, thickness: 1, color: _borderColor),
+                  _buildSectionTitle('Task History', Icons.task_rounded),
+                  const SizedBox(height: 8),
+                  ...data.taskHistory.map(
+                    (task) => _buildListItem(
+                      '${task.taskName ?? 'Unknown Task'} - ${task.status ?? 'Unknown'} (${task.duration ?? 'N/A'})',
+                      isTask: true,
+                    ),
+                  ),
+                ],
+
+                // Additional Information
+                if (data.reason != null ||
+                    data.leaveReason != null ||
+                    data.holidayName != null) ...[
+                  const Divider(height: 24, thickness: 1, color: _borderColor),
+                  _buildSectionTitle(
+                      'Additional Information', Icons.info_rounded),
+                  const SizedBox(height: 8),
+                  if (data.reason != null)
+                    _buildInfoRow('Reason:', data.reason!, Icons.note_rounded),
+                  if (data.leaveType != null)
+                    _buildInfoRow('Leave Type:', data.leaveType!,
+                        Icons.event_busy_rounded),
+                  if (data.leaveReason != null)
+                    _buildInfoRow('Leave Reason:', data.leaveReason!,
+                        Icons.event_busy_rounded),
+                  if (data.holidayName != null)
+                    _buildInfoRow('Holiday:', data.holidayName!,
+                        Icons.celebration_rounded),
+                ],
+
+                const SizedBox(height: 10),
+              ],
             ),
-          ],
-          
-          // Task History Section
-          if (data.taskHistory.isNotEmpty) ...[
-            const Divider(height: 24, thickness: 1, color: _borderColor),
-            _buildSectionTitle('Task History', Icons.task_rounded),
-            const SizedBox(height: 8),
-            ...data.taskHistory.map((task) => 
-              _buildListItem(
-                '${task.taskName ?? 'Unknown Task'} - ${task.status ?? 'Unknown'} (${task.duration ?? 'N/A'})',
-                isTask: true,
-              ),
-            ),
-          ],
-          
-          // Additional Information
-          if (data.reason != null || data.leaveReason != null || data.holidayName != null) ...[
-            const Divider(height: 24, thickness: 1, color: _borderColor),
-            _buildSectionTitle('Additional Information', Icons.info_rounded),
-            const SizedBox(height: 8),
-            if (data.reason != null)
-              _buildInfoRow('Reason:', data.reason!, Icons.note_rounded),
-            if (data.leaveType != null)
-              _buildInfoRow('Leave Type:', data.leaveType!, Icons.event_busy_rounded),
-            if (data.leaveReason != null)
-              _buildInfoRow('Leave Reason:', data.leaveReason!, Icons.event_busy_rounded),
-            if (data.holidayName != null)
-              _buildInfoRow('Holiday:', data.holidayName!, Icons.celebration_rounded),
-          ],
-          
-          const SizedBox(height: 10),
-        ],
-      ),
     );
   }
 
-
-
-  Widget _buildTimingRow(String label, String value, IconData icon, Color iconColor) {
+  Widget _buildTimingRow(
+      String label, String value, IconData icon, Color iconColor) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
         children: [
           Icon(icon, size: 16, color: iconColor),
           const SizedBox(width: 8),
-          Text(label, style: const TextStyle(fontSize: 13, color: _textLight, fontWeight: FontWeight.w500)),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 13,
+                  color: _textLight,
+                  fontWeight: FontWeight.w500)),
           const Spacer(),
-          Text(value, style: const TextStyle(fontSize: 13, color: _textDark, fontWeight: FontWeight.w600)),
+          Text(value,
+              style: const TextStyle(
+                  fontSize: 13, color: _textDark, fontWeight: FontWeight.w600)),
         ],
       ),
     );
   }
 
-  Widget _buildInfoRow(String label, String value, IconData icon, {bool isWarning = false}) {
+  Widget _buildInfoRow(String label, String value, IconData icon,
+      {bool isWarning = false}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: isWarning ? _errorRed : _textLight.withOpacity(0.8)),
+          Icon(icon,
+              size: 16,
+              color: isWarning ? _errorRed : _textLight.withOpacity(0.8)),
           const SizedBox(width: 8),
-          Text(label, style: const TextStyle(fontSize: 13, color: _textLight, fontWeight: FontWeight.w500)),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 13,
+                  color: _textLight,
+                  fontWeight: FontWeight.w500)),
           const Spacer(),
-          Text(
-            value, 
-            style: TextStyle(
-              fontSize: 13, 
-              color: isWarning ? _errorRed : _textDark, 
-              fontWeight: FontWeight.w600
-            )
-          ),
+          Text(value.replaceAll("_", " "),
+              style: TextStyle(
+                  fontSize: 13,
+                  color: isWarning ? _errorRed : _textDark,
+                  fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -1338,15 +1565,18 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
       children: [
         Icon(icon, size: 18, color: _primaryPurple),
         const SizedBox(width: 8),
-        Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _textDark)),
+        Text(title,
+            style: const TextStyle(
+                fontSize: 14, fontWeight: FontWeight.w600, color: _textDark)),
       ],
     );
   }
 
-  Widget _buildListItem(String item, {bool isLog = false, bool isTask = false}) {
+  Widget _buildListItem(String item,
+      {bool isLog = false, bool isTask = false}) {
     IconData icon;
     Color iconColor;
-    
+
     if (isTask) {
       icon = Icons.task_alt_rounded;
       iconColor = _accentBlue.withOpacity(0.8);
@@ -1357,7 +1587,7 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
       icon = Icons.check_circle_outline_rounded;
       iconColor = _accentGreen.withOpacity(0.8);
     }
-    
+
     return Padding(
       padding: EdgeInsets.only(left: isLog ? 0 : 8.0, top: 4, bottom: 4),
       child: Row(
@@ -1365,7 +1595,9 @@ class _AttendancePageState extends State<AttendancePage> with TickerProviderStat
         children: [
           Icon(icon, size: 14, color: iconColor),
           const SizedBox(width: 8),
-          Expanded(child: Text(item, style: TextStyle(fontSize: 12, color: _textLight))),
+          Expanded(
+              child: Text(item,
+                  style: TextStyle(fontSize: 12, color: _textLight))),
         ],
       ),
     );

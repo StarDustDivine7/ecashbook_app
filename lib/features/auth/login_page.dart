@@ -2,6 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart'
+    show canLaunchUrl, launchUrl, LaunchMode;
 
 import '../auth/auth_provider.dart';
 import '../security/pin_provider.dart';
@@ -13,7 +16,8 @@ class LoginPage extends ConsumerStatefulWidget {
   ConsumerState<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateMixin {
+class _LoginPageState extends ConsumerState<LoginPage>
+    with TickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
   final _password = TextEditingController();
@@ -31,6 +35,32 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
     _initAnimations();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadRememberedCredentials();
+      // Check if we should auto-navigate to dashboard
+      _checkAutoLogin();
+    });
+  }
+
+  void _checkAutoLogin() {
+    Future.delayed(const Duration(milliseconds: 500), () async {
+      if (!mounted) return;
+
+      final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
+
+      final isLoggedIn = prefs.getBool('user_logged_in') ?? false;
+      final token = prefs.getString('auth_token');
+
+      debugPrint(
+          '🔐 Auto-login check: isLoggedIn=$isLoggedIn, hasToken=${token != null}');
+
+      if (isLoggedIn && token != null && token.isNotEmpty && mounted) {
+        debugPrint(
+            '🔐 Auto-login: Verified login state, navigating to dashboard');
+        context.pushReplacement('/dashboard');
+      } else {
+        debugPrint(
+            '🔐 Auto-login: Not logged in or missing token, staying on login');
+      }
     });
   }
 
@@ -42,17 +72,17 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
     );
-    _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero).animate(
+    _slideAnimation =
+        Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic),
     );
     _animationController.forward();
   }
 
-
-
   void _loadRememberedCredentials() {
     final authState = ref.read(authProvider);
-    if (authState.rememberedEmail != null && authState.rememberedPassword != null) {
+    if (authState.rememberedEmail != null &&
+        authState.rememberedPassword != null) {
       _email.text = authState.rememberedEmail!;
       _password.text = authState.rememberedPassword!;
       setState(() {
@@ -119,17 +149,17 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
 
       if (success) {
         debugPrint('✅ Login successful - preparing navigation');
-        
+
         // Mark as having logged in at least once
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool('has_ever_logged_in', true);
         await prefs.setBool('is_first_time', false);
-        
+
         ref.read(pinProvider.notifier).clearPinRequired();
         debugPrint('🧹 PIN requirement cleared after login');
         await Future.delayed(const Duration(milliseconds: 300));
-        if (mounted) {
-          Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (route) => false);
+        if (mounted && context.mounted) {
+          context.pushReplacement('/dashboard');
         }
       } else {
         debugPrint('❌ Login failed - error will be shown by state listener');
@@ -163,28 +193,57 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
     }
   }
 
-
-
   void _showForgotPasswordModal() {
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           title: const Text(
             'Forgot Password?',
-            style: TextStyle(color: Color(0xFF422F90), fontWeight: FontWeight.bold),
+            style: TextStyle(
+              color: Color(0xFF422F90),
+              fontWeight: FontWeight.bold,
+            ),
           ),
           content: const Text(
-            'Please contact your Admin/HR for new password.',
-            style: TextStyle(fontSize: 16, height: 1.4),
+            'Click below to reset your password.',
+            style: TextStyle(
+              fontSize: 16,
+              height: 1.4,
+            ),
           ),
           actions: [
             TextButton(
+              onPressed: () async {
+                final Uri url = Uri.parse(
+                  'https://portal.ecashbook.in/forget-password',
+                );
+
+                bool launched = await launchUrl(
+                  url,
+                  mode: LaunchMode.externalApplication,
+                );
+
+                print('Launched: $launched');
+              },
+              child: const Text(
+                'Reset Password',
+                style: TextStyle(
+                  color: Color(0xFF422F90),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            TextButton(
               onPressed: () => Navigator.of(context).pop(),
               child: const Text(
-                'OK',
-                style: TextStyle(color: Color(0xFF422F90), fontWeight: FontWeight.w600),
+                'Cancel',
+                style: TextStyle(
+                  color: Colors.grey,
+                ),
               ),
             ),
           ],
@@ -198,7 +257,8 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
     final authState = ref.watch(authProvider);
 
     ref.listen(authProvider, (previous, next) {
-      if (next.errorMessage != null && next.errorMessage != previous?.errorMessage) {
+      if (next.errorMessage != null &&
+          next.errorMessage != previous?.errorMessage) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(
@@ -261,11 +321,15 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
                               child: const Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.business, size: 60, color: Colors.white),
+                                  Icon(Icons.business,
+                                      size: 60, color: Colors.white),
                                   SizedBox(height: 8),
                                   Text(
                                     'EcashBook',
-                                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+                                    style: TextStyle(
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white),
                                   ),
                                 ],
                               ),
@@ -286,7 +350,9 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
                     width: double.infinity,
                     decoration: const BoxDecoration(
                       color: Colors.white,
-                      borderRadius: BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30)),
+                      borderRadius: BorderRadius.only(
+                          topLeft: Radius.circular(30),
+                          topRight: Radius.circular(30)),
                     ),
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.all(24),
@@ -298,32 +364,45 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
                             const SizedBox(height: 40),
                             const Text(
                               'Welcome to Ecashbook',
-                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF422F90)),
+                              style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF422F90)),
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 8),
                             Text(
                               'Please login to continue.',
-                              style: TextStyle(fontSize: 16, color: Colors.grey, height: 1.4),
+                              style: TextStyle(
+                                  fontSize: 16,
+                                  color: Colors.grey,
+                                  height: 1.4),
                               textAlign: TextAlign.center,
                             ),
                             if (authState.currentLocation != null) ...[
                               const SizedBox(height: 16),
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 8),
                                 decoration: BoxDecoration(
                                   color: Colors.green.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                                  border: Border.all(
+                                      color:
+                                          Colors.green.withValues(alpha: 0.3)),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.location_on, size: 16, color: Colors.green),
+                                    Icon(Icons.location_on,
+                                        size: 16, color: Colors.green),
                                     const SizedBox(width: 6),
                                     Text(
                                       'Location detected',
-                                      style: TextStyle(fontSize: 12, color: Colors.green, fontWeight: FontWeight.w500),
+                                      style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.green,
+                                          fontWeight: FontWeight.w500),
                                     ),
                                   ],
                                 ),
@@ -334,9 +413,11 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
                             TextFormField(
                               controller: _email,
                               keyboardType: TextInputType.emailAddress,
+                              style: const TextStyle(color: Colors.black),
                               decoration: InputDecoration(
                                 labelText: 'Username/Email Address',
-                                prefixIcon: Icon(Icons.person_outline, color: Colors.grey),
+                                prefixIcon: Icon(Icons.person_outline,
+                                    color: Colors.grey),
                                 filled: true,
                                 fillColor: Colors.white,
                                 border: OutlineInputBorder(
@@ -349,11 +430,15 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(color: Color(0xFF422F90), width: 2),
+                                  borderSide: const BorderSide(
+                                      color: Color(0xFF422F90), width: 2),
                                 ),
-                                labelStyle: TextStyle(color: Colors.grey, fontSize: 16),
-                                floatingLabelStyle: const TextStyle(color: Color(0xFF422F90), fontSize: 16),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                labelStyle:
+                                    TextStyle(color: Colors.grey, fontSize: 16),
+                                floatingLabelStyle: const TextStyle(
+                                    color: Color(0xFF422F90), fontSize: 16),
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 16),
                               ),
                               validator: (value) {
                                 if (value == null || value.isEmpty) {
@@ -367,9 +452,11 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
                             TextFormField(
                               controller: _password,
                               obscureText: _obscurePassword,
+                              style: const TextStyle(color: Colors.black),
                               decoration: InputDecoration(
                                 labelText: 'Password',
-                                prefixIcon: Icon(Icons.lock_outline, color: Colors.grey),
+                                prefixIcon: Icon(Icons.lock_outline,
+                                    color: Colors.grey),
                                 filled: true,
                                 fillColor: Colors.white,
                                 border: OutlineInputBorder(
@@ -382,17 +469,24 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
-                                  borderSide: const BorderSide(color: Color(0xFF422F90), width: 2),
+                                  borderSide: const BorderSide(
+                                      color: Color(0xFF422F90), width: 2),
                                 ),
-                                labelStyle: TextStyle(color: Colors.grey, fontSize: 16),
-                                floatingLabelStyle: const TextStyle(color: Color(0xFF422F90), fontSize: 16),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                labelStyle:
+                                    TextStyle(color: Colors.grey, fontSize: 16),
+                                floatingLabelStyle: const TextStyle(
+                                    color: Color(0xFF422F90), fontSize: 16),
+                                contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 16),
                                 suffixIcon: IconButton(
                                   icon: Icon(
-                                    _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                                    _obscurePassword
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
                                     color: Colors.grey,
                                   ),
-                                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                                  onPressed: () => setState(() =>
+                                      _obscurePassword = !_obscurePassword),
                                 ),
                               ),
                               validator: (value) {
@@ -410,18 +504,25 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
                                   scale: 0.9,
                                   child: Checkbox(
                                     value: _rememberMe,
-                                    onChanged: (value) => setState(() => _rememberMe = value ?? false),
+                                    onChanged: (value) => setState(
+                                        () => _rememberMe = value ?? false),
                                     activeColor: const Color(0xFF422F90),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(4)),
                                   ),
                                 ),
-                                Text('Remember Me', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                                Text('Remember Me',
+                                    style: TextStyle(
+                                        fontSize: 14, color: Colors.grey)),
                                 const Spacer(),
                                 TextButton(
                                   onPressed: _showForgotPasswordModal,
                                   child: const Text(
                                     'Forgot Password?',
-                                    style: TextStyle(fontSize: 14, color: Color(0xFF422F90), fontWeight: FontWeight.w600),
+                                    style: TextStyle(
+                                        fontSize: 14,
+                                        color: Color(0xFF422F90),
+                                        fontWeight: FontWeight.w600),
                                   ),
                                 ),
                               ],
@@ -435,35 +536,46 @@ class _LoginPageState extends ConsumerState<LoginPage> with TickerProviderStateM
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFF422F90),
                                   foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16)),
                                   elevation: 2,
-                                  shadowColor: const Color(0xFF422F90).withValues(alpha: 0.3),
+                                  shadowColor: const Color(0xFF422F90)
+                                      .withValues(alpha: 0.3),
                                 ),
-                                onPressed: (_isLoggingIn || authState.isLoading) ? null : _handleLogin,
+                                onPressed: (_isLoggingIn || authState.isLoading)
+                                    ? null
+                                    : _handleLogin,
                                 child: (_isLoggingIn || authState.isLoading)
                                     ? const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                      ),
-                                    ),
-                                    SizedBox(width: 12),
-                                    Text('Logging in...'),
-                                  ],
-                                )
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          SizedBox(
+                                            width: 20,
+                                            height: 20,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              valueColor:
+                                                  AlwaysStoppedAnimation<Color>(
+                                                      Colors.white),
+                                            ),
+                                          ),
+                                          SizedBox(width: 12),
+                                          Text('Logging in...'),
+                                        ],
+                                      )
                                     : const Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(Icons.login, size: 20),
-                                    SizedBox(width: 8),
-                                    Text('Log in', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-                                  ],
-                                ),
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Icon(Icons.login, size: 20),
+                                          SizedBox(width: 8),
+                                          Text('Log in',
+                                              style: TextStyle(
+                                                  fontSize: 18,
+                                                  fontWeight: FontWeight.w600)),
+                                        ],
+                                      ),
                               ),
                             ),
 

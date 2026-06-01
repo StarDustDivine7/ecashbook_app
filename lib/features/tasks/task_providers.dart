@@ -69,6 +69,32 @@ class TaskListNotifier extends StateNotifier<TaskListState> {
     }
   }
 
+  Future<void> loadCompletedTasks() async {
+    state = state.copyWith(loading: true, error: null);
+
+    try {
+      final response = await _apiService.fetchCompletedTasks();
+      if (response.success) {
+        state = state.copyWith(
+          tasks: response.data.taskList,
+          overview: response.data.overview,
+          loading: false,
+          error: null,
+        );
+      } else {
+        state = state.copyWith(
+          loading: false,
+          error: response.message,
+        );
+      }
+    } catch (e) {
+      state = state.copyWith(
+        loading: false,
+        error: e.toString(),
+      );
+    }
+  }
+
   Future <void> refresh() async {
     await load();
   }

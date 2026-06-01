@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:go_router/go_router.dart';
 
 class WelcomeModal extends StatelessWidget {
   const WelcomeModal({super.key});
@@ -40,9 +41,9 @@ class WelcomeModal extends StatelessWidget {
                   color: Color(0xFF6366F1),
                 ),
               ),
-              
+
               const SizedBox(height: 24),
-              
+
               // Welcome Title
               const Text(
                 'Welcome to EcashBook!',
@@ -53,9 +54,9 @@ class WelcomeModal extends StatelessWidget {
                 ),
                 textAlign: TextAlign.center,
               ),
-              
+
               const SizedBox(height: 16),
-              
+
               // Description
               const Text(
                 'To provide you with the best experience, we need to request some permissions for location tracking, camera access, and notifications.',
@@ -66,9 +67,9 @@ class WelcomeModal extends StatelessWidget {
                 ),
                 textAlign: TextAlign.center,
               ),
-              
+
               const SizedBox(height: 32),
-              
+
               // Continue Button
               SizedBox(
                 width: double.infinity,
@@ -103,9 +104,9 @@ class WelcomeModal extends StatelessWidget {
     // Clear the flag that triggers this modal
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('show_permissions_after_dashboard');
-    
-    // Close modal and navigate to permissions
-    Navigator.of(context).pop();
-    Navigator.of(context).pushReplacementNamed('/permissions');
+
+    // Close modal and navigate to permissions using Go Router
+    Navigator.of(context).pop(); // Close the modal first
+    context.go('/permissions'); // Then navigate to permissions
   }
 }

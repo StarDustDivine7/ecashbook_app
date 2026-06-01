@@ -47,6 +47,44 @@ class TaskApiService {
     }
   }
 
+  Future<TaskListResponse> fetchCompletedTasks() async {
+    try {
+      final user = await AuthService.getSavedUser();
+      final empId = user?.employeeId ?? '';
+      final secure = await AuthService.getSecure() ?? '';
+
+      if (empId.isEmpty || secure.isEmpty) {
+        throw Exception('Missing employee credentials');
+      }
+
+      final now = DateTime.now();
+      final todayDate = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final currentTime = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+
+      // Get authentication headers
+      final headers = await AuthService.getAuthHeaders();
+      
+      final response = await _dio.post(
+        ApiConfig.completedTaskList,
+        data: jsonEncode({
+          "empId": empId,
+          "toDayDate": todayDate,
+          "currentTime": currentTime,
+          "secure": secure,
+        }),
+        options: Options(headers: headers),
+      );
+
+      final Map<String, dynamic> map = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : Map<String, dynamic>.from(json.decode(response.data as String) as Map);
+
+      return TaskListResponse.fromJson(map);
+    } catch (e) {
+      throw Exception('Failed to fetch completed tasks: ${e.toString()}');
+    }
+  }
+
   Future<TaskDetailsResponse> fetchTaskDetails(String taskId) async {
     try {
       final user = await AuthService.getSavedUser();

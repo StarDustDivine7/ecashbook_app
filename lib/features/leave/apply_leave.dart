@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/services/auth_service.dart';
+import '../../core/services/leave_api_service.dart';
 import 'leave_service.dart';
 
 class ApplyLeavePage extends ConsumerStatefulWidget {
@@ -24,8 +26,19 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
   bool _isMultipleDays = false;
   DateTime? _fromDate;
   DateTime? _toDate;
+  String _selectedLeaveType = 'Casual';
   final TextEditingController _reasonController = TextEditingController();
   bool _isLoading = false;
+
+  final List<String> _leaveTypes = [
+    'Sick',
+    'Casual',
+    'Annual',
+    'Maternity',
+    'Paternity',
+    'Emergency',
+    'Other',
+  ];
 
   @override
   void dispose() {
@@ -36,23 +49,35 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // appBar: AppBar(
+      //   title: const Text(
+      //     'Apply for Leave',
+      //     style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18),
+      //   ),
+      //   backgroundColor: _primaryPurple,
+      //   foregroundColor: Colors.white,
+      //   elevation: 0,
+      //   centerTitle: true,
+      // ),
       backgroundColor: _surfaceColor,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              // Header Card
-              _buildHeaderCard(),
+      resizeToAvoidBottomInset: true,
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.only(
+          bottom: 24,
+        ),
+        child: Column(
+          children: [
+            // Header Card
+            _buildHeaderCard(),
 
-              // Form Card
-              _buildFormCard(),
+            // Form Card
+            _buildFormCard(),
 
-              // Submit Button
-              _buildSubmitButton(),
+            // Submit Button
+            _buildSubmitButton(),
 
-              const SizedBox(height: 20),
-            ],
-          ),
+            const SizedBox(height: 20),
+          ],
         ),
       ),
     );
@@ -71,7 +96,7 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: _primaryPurple.withValues(alpha: 0.3), // FIXED: withOpacity → withValues
+            color: _primaryPurple.withValues(alpha: 0.3),
             blurRadius: 15,
             offset: const Offset(0, 8),
           ),
@@ -139,9 +164,57 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Leave Type Section
+          // Leave Type Dropdown
           const Text(
             'Leave Type',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: _textDark,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            decoration: BoxDecoration(
+              color: _surfaceColor,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _borderColor),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _selectedLeaveType,
+                isExpanded: true,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                dropdownColor: Colors.white,
+                items: _leaveTypes.map((String type) {
+                  return DropdownMenuItem<String>(
+                    value: type,
+                    child: Text(
+                      type,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  );
+                }).toList(),
+                onChanged: (String? newValue) {
+                  if (newValue != null) {
+                    setState(() {
+                      _selectedLeaveType = newValue;
+                      print(_selectedLeaveType.toString());
+                    });
+                  }
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          // Duration Type Section
+          const Text(
+            'Duration',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -177,21 +250,23 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: !_isMultipleDays ? _primaryPurple : _borderColor,
+                              color: !_isMultipleDays
+                                  ? _primaryPurple
+                                  : _borderColor,
                               width: 2,
                             ),
                           ),
                           child: !_isMultipleDays
                               ? Center(
-                            child: Container(
-                              width: 10,
-                              height: 10,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _primaryPurple,
-                              ),
-                            ),
-                          )
+                                  child: Container(
+                                    width: 10,
+                                    height: 10,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: _primaryPurple,
+                                    ),
+                                  ),
+                                )
                               : null,
                         ),
                         const SizedBox(width: 12),
@@ -229,21 +304,23 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             border: Border.all(
-                              color: _isMultipleDays ? _primaryPurple : _borderColor,
+                              color: _isMultipleDays
+                                  ? _primaryPurple
+                                  : _borderColor,
                               width: 2,
                             ),
                           ),
                           child: _isMultipleDays
                               ? Center(
-                            child: Container(
-                              width: 10,
-                              height: 10,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: _primaryPurple,
-                              ),
-                            ),
-                          )
+                                  child: Container(
+                                    width: 10,
+                                    height: 10,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: _primaryPurple,
+                                    ),
+                                  ),
+                                )
                               : null,
                         ),
                         const SizedBox(width: 12),
@@ -379,7 +456,9 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    selectedDate == null ? 'Select date' : _formatDate(selectedDate),
+                    selectedDate == null
+                        ? 'Select date'
+                        : _formatDate(selectedDate),
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
@@ -417,27 +496,27 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
         ),
         child: _isLoading
             ? const SizedBox(
-          width: 20,
-          height: 20,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-          ),
-        )
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
             : const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.send_rounded, size: 20),
-            SizedBox(width: 8),
-            Text(
-              'Submit Leave Request',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.send_rounded, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'Submit Leave Request',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -449,17 +528,16 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
 
     final pickedDate = await showDatePicker(
       context: context,
-      initialDate: isFromDate
-          ? (_fromDate ?? now)
-          : (_toDate ?? _fromDate ?? now),
+      initialDate:
+          isFromDate ? (_fromDate ?? now) : (_toDate ?? _fromDate ?? now),
       firstDate: firstDate,
       lastDate: lastDate,
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
             colorScheme: Theme.of(context).colorScheme.copyWith(
-              primary: _primaryPurple,
-            ),
+                  primary: _primaryPurple,
+                ),
           ),
           child: child!,
         );
@@ -470,7 +548,8 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
       setState(() {
         if (isFromDate) {
           _fromDate = pickedDate;
-          if (_isMultipleDays && (_toDate == null || _toDate!.isBefore(_fromDate!))) {
+          if (_isMultipleDays &&
+              (_toDate == null || _toDate!.isBefore(_fromDate!))) {
             _toDate = null;
           }
         } else {
@@ -490,45 +569,95 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
   }
 
   Future<void> _submitLeaveRequest() async {
+    print('🔵 ========== SUBMIT BUTTON CLICKED ==========');
+
     // Validation
     if (_fromDate == null) {
+      print('❌ Validation Failed: Date not selected');
       _showErrorMessage('Please select a date');
       return;
     }
 
     if (_isMultipleDays && _toDate == null) {
+      print('❌ Validation Failed: To date not selected for multiple days');
       _showErrorMessage('Please select to date');
       return;
     }
 
     if (_reasonController.text.trim().isEmpty) {
+      print('❌ Validation Failed: Reason is empty');
       _showErrorMessage('Please enter reason for leave');
       return;
     }
+
+    if (_selectedLeaveType.isEmpty) {
+      print('❌ Validation Failed: Leave type not selected');
+      _showErrorMessage('Please select leave type');
+      return;
+    }
+
+    print('✅ All validations passed');
 
     setState(() {
       _isLoading = true;
     });
 
     try {
-      // Simulate API call
-      await Future.delayed(const Duration(seconds: 2));
+      // Get empId and secure from AuthService
+      final user = await AuthService.getSavedUser();
+      final secure = await AuthService.getSecure();
 
-      final newRequest = LeaveRequest(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        employeeId: 'EMP001',
-        employeeName: 'John Doe',
-        isMultipleDays: _isMultipleDays,
+      print('📦 Retrieved from AuthService:');
+      print('   user: ${user?.employeeId}');
+      print('   secure: ${secure?.substring(0, 20)}...');
+
+      if (user == null || secure == null) {
+        print('❌ Session data missing');
+        _showErrorMessage('Session expired. Please login again.');
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final empId = user.employeeId;
+
+      // Determine toDate (same as fromDate for single day leave)
+      final toDate = _isMultipleDays ? _toDate! : _fromDate!;
+
+      // Call API (send leaveType in lowercase)
+      final result = await LeaveApiService.applyLeave(
+        empId: empId,
         fromDate: _fromDate!,
-        toDate: _isMultipleDays ? _toDate : null,
+        toDate: toDate,
         reason: _reasonController.text.trim(),
-        appliedDate: DateTime.now(),
+        leaveType: _selectedLeaveType.toLowerCase(),
+        secure: secure,
       );
 
-      ref.read(leaveServiceProvider.notifier).applyLeave(newRequest);
+      print('📨 API Response:');
+      print('   Success: ${result['success']}');
+      print('   Message: ${result['message']}');
+      print('   Data: ${result['data']}');
 
-      // Show success message
-      if (mounted) {
+      if (!mounted) return;
+
+      if (result['success'] == true) {
+        // Add to local state for UI update
+        final newRequest = LeaveRequest(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          employeeId: empId,
+          employeeName: user.name,
+          isMultipleDays: _isMultipleDays,
+          fromDate: _fromDate!,
+          toDate: _isMultipleDays ? _toDate : null,
+          reason: _reasonController.text.trim(),
+          appliedDate: DateTime.now(),
+        );
+
+        ref.read(leaveServiceProvider.notifier).applyLeave(newRequest);
+
+        // Show success message
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(
@@ -546,9 +675,12 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                const Text(
-                  'Leave request submitted successfully!',
-                  style: TextStyle(fontWeight: FontWeight.w600),
+                Expanded(
+                  child: Text(
+                    result['message'] ??
+                        'Leave request submitted successfully!',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
                 ),
               ],
             ),
@@ -561,22 +693,35 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
             duration: const Duration(seconds: 3),
           ),
         );
+
+        // Reset form
+        setState(() {
+          _isMultipleDays = false;
+          _fromDate = null;
+          _toDate = null;
+          _selectedLeaveType = 'Casual';
+          _reasonController.clear();
+        });
+
+        // Navigate back after short delay
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (mounted) {
+          Navigator.pop(context);
+        }
+      } else {
+        _showErrorMessage(
+            result['message'] ?? 'Failed to submit leave request');
       }
-
-      // Reset form
-      setState(() {
-        _isMultipleDays = false;
-        _fromDate = null;
-        _toDate = null;
-        _reasonController.clear();
-      });
-
     } catch (e) {
-      _showErrorMessage('Failed to submit leave request');
+      if (mounted) {
+        _showErrorMessage('Failed to submit leave request: ${e.toString()}');
+      }
     } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -587,7 +732,12 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
           children: [
             const Icon(Icons.error_outline_rounded, color: Colors.white),
             const SizedBox(width: 12),
-            Text(message),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
           ],
         ),
         backgroundColor: _errorRed,
@@ -596,14 +746,25 @@ class _ApplyLeavePageState extends ConsumerState<ApplyLeavePage> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
+        duration: const Duration(seconds: 4),
       ),
     );
   }
 
   String _formatDate(DateTime date) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
     ];
     return '${date.day} ${months[date.month - 1]} ${date.year}';
   }

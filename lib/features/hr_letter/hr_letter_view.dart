@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../shared/bottom_menu.dart';
+import '../../shared/main_layout.dart';
 
 class HrLetterViewPage extends StatelessWidget {
   final String subject;
@@ -192,6 +194,15 @@ class HrLetterViewPage extends StatelessWidget {
             const SizedBox(height: 20),
           ],
         ),
+      ),
+      bottomNavigationBar: BottomMenuBar(
+        currentIndex: 2,
+        onTap: (index) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => MainLayout(initialIndex: index)),
+          );
+        },
       ),
     );
   }

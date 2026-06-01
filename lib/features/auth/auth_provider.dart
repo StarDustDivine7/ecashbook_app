@@ -65,7 +65,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await _checkLoginState();
       if (mounted) {
         state = state.copyWith(isInitializing: false, isFirstTime: isFirstTime);
-        debugPrint('✅ Auth initialization complete - Logged in: ${state.isLoggedIn}');
+        debugPrint(
+            '✅ Auth initialization complete - Logged in: ${state.isLoggedIn}');
       }
     } catch (e) {
       if (mounted) {
@@ -98,10 +99,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final wasLoggedIn = prefs.getBool('user_logged_in') ?? false;
-      final sessionActive = await AuthService.isSessionActive();
+      // Also verify token exists — prevents stale isLoggedIn=true after force-logout
+      final token = prefs.getString('auth_token');
+      final isActuallyLoggedIn =
+          wasLoggedIn && token != null && token.isNotEmpty;
       if (mounted) {
-        state = state.copyWith(isLoggedIn: wasLoggedIn && sessionActive);
-        debugPrint('✅ Login state: wasLoggedIn=$wasLoggedIn, sessionActive=$sessionActive');
+        state = state.copyWith(isLoggedIn: isActuallyLoggedIn);
+        debugPrint(
+            '✅ Login state: wasLoggedIn=$wasLoggedIn, hasToken=${token != null}, effective=$isActuallyLoggedIn');
       }
     } catch (e) {
       debugPrint('❌ Error checking login state: $e');
@@ -135,15 +140,20 @@ class AuthNotifier extends StateNotifier<AuthState> {
       if (mounted) {
         if (position != null) {
           final locationString = AuthService.formatLocation(position);
-          state = state.copyWith(currentLocation: locationString, isLocationLoading: false);
+          state = state.copyWith(
+              currentLocation: locationString, isLocationLoading: false);
           debugPrint('✅ Location: $locationString');
         } else {
-          state = state.copyWith(currentLocation: 'Location access denied', isLocationLoading: false);
+          state = state.copyWith(
+              currentLocation: 'Location access denied',
+              isLocationLoading: false);
         }
       }
     } catch (e) {
       if (mounted) {
-        state = state.copyWith(currentLocation: 'Unable to get location', isLocationLoading: false);
+        state = state.copyWith(
+            currentLocation: 'Unable to get location',
+            isLocationLoading: false);
       }
       debugPrint('❌ Location error: $e');
     }
@@ -155,7 +165,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final rememberedEmail = prefs.getString('remembered_email');
       final rememberedPassword = prefs.getString('remembered_password');
       if (rememberedEmail != null && rememberedPassword != null && mounted) {
-        state = state.copyWith(rememberedEmail: rememberedEmail, rememberedPassword: rememberedPassword);
+        state = state.copyWith(
+            rememberedEmail: rememberedEmail,
+            rememberedPassword: rememberedPassword);
         debugPrint('📝 Remembered credentials loaded');
       }
     } catch (e) {
@@ -172,7 +184,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
           state = state.copyWith(
             isLoggedIn: false,
             isLoading: false,
-            errorMessage: result.message ?? 'Invalid username or password. Please try again.',
+            errorMessage: result.message ??
+                'Invalid username or password. Please try again.',
           );
         }
         debugPrint('❌ Login failed - ${result.message}');
@@ -188,14 +201,16 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await _saveLoginState();
       await AuthService.saveAuthSession();
       if (mounted) {
-        state = state.copyWith(isLoggedIn: true, isLoading: false, errorMessage: null);
+        state = state.copyWith(
+            isLoggedIn: true, isLoading: false, errorMessage: null);
       }
       getCurrentLocation();
       debugPrint('✅ API Login successful');
       return true;
     } catch (e) {
       if (mounted) {
-        state = state.copyWith(isLoading: false, errorMessage: 'Login error. Please try again.');
+        state = state.copyWith(
+            isLoading: false, errorMessage: 'Login error. Please try again.');
       }
       debugPrint('❌ Login exception: $e');
       return false;
@@ -208,7 +223,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
       await prefs.setString('remembered_email', email);
       await prefs.setString('remembered_password', password);
       if (mounted) {
-        state = state.copyWith(rememberedEmail: email, rememberedPassword: password);
+        state = state.copyWith(
+            rememberedEmail: email, rememberedPassword: password);
       }
       debugPrint('💾 Credentials saved');
     } catch (e) {
@@ -233,18 +249,27 @@ class AuthNotifier extends StateNotifier<AuthState> {
   Future<void> logout() async {
     try {
       debugPrint('🚪 Starting logout process with API call...');
-      
+
       // Call logout API
       final logoutResult = await AuthService.logoutWithAPI();
-      
+
       if (logoutResult.isUnauthorized) {
         debugPrint('🔒 Unauthorized token - data already cleared');
       } else if (logoutResult.success) {
         debugPrint('✅ Logout API successful');
       } else {
-        debugPrint('⚠️ Logout API failed but data cleared: ${logoutResult.message}');
+        debugPrint(
+            '⚠️ Logout API failed but data cleared: ${logoutResult.message}');
       }
-      
+
+      // Always clear local session and login flag regardless of API outcome
+      try {
+        await AuthService.clearAllAppData();
+      } catch (e) {
+        debugPrint('❌ Error clearing app data on logout: $e');
+      }
+      await _clearLoginState();
+
       // Update state
       if (mounted) {
         state = state.copyWith(
@@ -256,7 +281,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
           rememberedPassword: state.rememberedPassword,
         );
       }
-      
+
       debugPrint('✅ Logout process completed - will redirect to login page');
     } catch (e) {
       debugPrint('❌ Logout error: $e');
@@ -264,14 +289,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
       try {
         await AuthService.clearAllAppData();
       } catch (_) {}
-      
+      await _clearLoginState();
+
       if (mounted) {
         state = state.copyWith(
-          isLoggedIn: false, 
-          isFirstTime: false, 
-          currentLocation: null, 
-          errorMessage: null
-        );
+            isLoggedIn: false,
+            isFirstTime: false,
+            currentLocation: null,
+            errorMessage: null);
       }
     }
   }
@@ -283,6 +308,20 @@ class AuthNotifier extends StateNotifier<AuthState> {
   void clearError() {
     if (mounted) {
       state = state.copyWith(errorMessage: null);
+    }
+  }
+
+  /// Called when a force-logout happens (e.g. token invalidated by another device login)
+  /// Immediately updates in-memory state so no widget re-triggers the unauthorized flow
+  void forceLoggedOut() {
+    if (mounted) {
+      state = state.copyWith(
+        isLoggedIn: false,
+        isFirstTime: false,
+        currentLocation: null,
+        errorMessage: null,
+      );
+      debugPrint('🔒 AuthNotifier: forceLoggedOut called - state updated');
     }
   }
 }

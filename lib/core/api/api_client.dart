@@ -1,5 +1,6 @@
 // lib/core/api/api_client.dart
 import 'package:dio/dio.dart';
+import '../services/auth_service.dart';
 import '../config/api_config.dart';
 
 class ApiClient {
@@ -154,26 +155,50 @@ class ApiClient {
     required String secure,
   }) async {
     try {
-      final response = await dio.post(
+      // Validate input parameters
+      if (empId.isEmpty || year.isEmpty || secure.isEmpty) {
+        throw Exception('Invalid parameters provided');
+      }
+
+      final headers = await AuthService.getAuthHeaders();
+      if (headers == null) {
+        throw Exception('Failed to get authentication headers');
+      }
+
+      final response = await dio.post<Map<String, dynamic>>(
         ApiConfig.companyHolidays,
-        data: {
+        data: <String, dynamic>{
           "empId": empId,
           "year": year,
           "secure": secure,
         },
+        options: Options(
+          headers: headers,
+          validateStatus: (int? code) => code != null && code < 500,
+        ),
       );
-      print("API raw response: ${response.data}");
-      print("API status: ${response.statusCode}");
-      if (response.statusCode == 200 && response.data['success'] == true) {
-        return response.data['data'] as List;
+
+      final responseData = response.data;
+      if (response.statusCode == 200 && 
+          responseData != null && 
+          responseData['success'] == true) {
+        final data = responseData['data'];
+        if (data is List) {
+          return data;
+        }
+        throw Exception('Invalid data format received from server');
       }
-      throw Exception('Server returned status code: ${response.statusCode}');
+      
+      final errorMessage = responseData?['message']?.toString() ?? 
+          'Server returned status code: ${response.statusCode}';
+      throw Exception(errorMessage);
     } on DioException catch (e) {
-      print("DioException: ${e.message} / ${e.response?.statusCode}");
       if (e.response?.statusCode == 401) {
         throw Exception("401 Unauthorized - Token/session expired or invalid.");
       }
-      throw Exception("API exception: ${e.message}");
+      throw Exception("API exception: ${e.message ?? 'Unknown network error'}");
+    } catch (e) {
+      throw Exception('Failed to fetch company holidays: ${e.toString()}');
     }
   }
 }

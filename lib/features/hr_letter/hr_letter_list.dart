@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'hr_letter_view.dart';
+import '../../core/services/hr_letter_service.dart';
 
 class HrLetterListPage extends StatefulWidget {
   const HrLetterListPage({super.key});
@@ -22,263 +23,124 @@ class _HrLetterListPageState extends State<HrLetterListPage> {
   static const Color _textLight = Color(0xFF64748B);
   static const Color _borderColor = Color(0xFFE2E8F0);
 
-  // Sample HR Letters Data - NOT FINAL because we need to modify isRead status
-  List<Map<String, dynamic>> hrLetters = [ // FIXED: Removed underscore and 'final' - this field needs to be mutable
-    {
-      'id': '1',
-      'subject': 'Welcome to EcashBook Solutions',
-      'sender': 'HR Department',
-      'senderEmail': 'hr@ecashbook.com',
-      'date': 'Aug 21, 2025',
-      'time': '10:30 AM',
-      'content': '''Dear Team Member,
+  // Letters data (filled from API)
+  List<Map<String, dynamic>> hrLetters = [];
+  bool _loading = false;
+  String? _error;
+  final Set<String> _readIds = {};
 
-We are delighted to welcome you to EcashBook Solutions! This letter serves as an official welcome and provides you with essential information about your role and our company.
+  @override
+  void initState() {
+    super.initState();
+    _fetchLetters();
+  }
 
-Company Overview:
-EcashBook Solutions is a leading financial technology company specializing in employee management and payroll solutions. We pride ourselves on innovation, excellence, and creating value for our clients.
+  DateTime? _parseSentAt(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    final iso = s.contains('T') ? s : s.replaceFirst(' ', 'T');
+    return DateTime.tryParse(iso);
+  }
 
-Your Role:
-As a valued member of our team, you will be contributing to our mission of revolutionizing workplace management through technology. Your skills and expertise will help us maintain our position as industry leaders.
-
-What to Expect:
-- Comprehensive onboarding program
-- Access to cutting-edge technology and tools
-- Collaborative work environment
-- Professional development opportunities
-- Competitive benefits package
-
-Next Steps:
-1. Complete your onboarding documentation
-2. Attend orientation session on your first day
-3. Meet with your team lead for role-specific training
-4. Set up your workspace and access credentials
-
-We look forward to working with you and seeing the positive impact you'll make on our organization.
-
-Best regards,
-HR Department
-EcashBook Solutions''',
-      'isRead': false, // UNREAD
-      'priority': 'high',
-    },
-    {
-      'id': '2',
-      'subject': 'Updated Leave Policy - Effective September 2025',
-      'sender': 'Policy Team',
-      'senderEmail': 'policy@ecashbook.com',
-      'date': 'Aug 20, 2025',
-      'time': '02:15 PM',
-      'content': '''Dear Employees,
-
-We are writing to inform you of important updates to our company leave policy, effective September 1, 2025.
-
-Key Changes:
-
-1. Annual Leave:
-- Increased from 20 to 25 days per year
-- Can be carried forward up to 5 days to next year
-- Advance booking required for leaves exceeding 5 consecutive days
-
-2. Sick Leave:
-- Remains at 12 days per year
-- Medical certificate required for leaves exceeding 3 consecutive days
-- Unused sick leave cannot be carried forward
-
-3. Personal Leave:
-- New category introduced: 3 days per year
-- Can be used for personal emergencies
-- Prior approval from immediate supervisor required
-
-4. Maternity/Paternity Leave:
-- Extended to 6 months for maternity leave
-- Paternity leave increased to 15 days
-- Benefits and salary protection during leave period
-
-5. Application Process:
-- All leave applications must be submitted through the EcashBook app
-- Minimum 24 hours notice required (except emergencies)
-- Auto-approval for leaves up to 2 days (subject to team requirements)
-
-Please review the complete policy document attached to this email. For any questions, contact HR at hr@ecashbook.com.
-
-Thank you for your attention to this matter.
-
-HR Policy Team
-EcashBook Solutions''',
-      'isRead': true, // READ
-      'priority': 'medium',
-    },
-    {
-      'id': '3',
-      'subject': 'Annual Performance Review Schedule',
-      'sender': 'Performance Team',
-      'senderEmail': 'performance@ecashbook.com',
-      'date': 'Aug 18, 2025',
-      'time': '11:45 AM',
-      'content': '''Dear Team,
-
-It's that time of year again! We're excited to announce the schedule for our Annual Performance Review process.
-
-Review Timeline:
-- Self-Assessment Submission: September 1-15, 2025
-- Manager Review Period: September 16-30, 2025
-- HR Review and Calibration: October 1-15, 2025
-- Final Review Meetings: October 16-31, 2025
-
-What You Need to Do:
-
-1. Complete Self-Assessment:
-   - Reflect on your achievements from the past year
-   - Identify areas for improvement
-   - Set goals for the upcoming year
-   - Submit through the HR portal
-
-2. Gather Supporting Documents:
-   - Project completion certificates
-   - Client feedback and testimonials
-   - Training completion records
-   - Any additional accomplishments
-
-3. Schedule Review Meeting:
-   - Coordinate with your manager for a 60-minute review session
-   - Prepare to discuss career aspirations and development needs
-
-Review Criteria:
-- Goal Achievement (40%)
-- Quality of Work (25%)
-- Team Collaboration (20%)
-- Innovation and Initiative (15%)
-
-This is an excellent opportunity to showcase your contributions and plan your career growth. We encourage you to approach this process with enthusiasm and honesty.
-
-If you have any questions about the review process, please don't hesitate to reach out.
-
-Best regards,
-Performance Management Team''',
-      'isRead': true, // READ
-      'priority': 'medium',
-    },
-    {
-      'id': '4',
-      'subject': 'Health & Safety Guidelines Update',
-      'sender': 'Safety Committee',
-      'senderEmail': 'safety@ecashbook.com',
-      'date': 'Aug 15, 2025',
-      'time': '09:20 AM',
-      'content': '''Dear All,
-
-Your safety and well-being are our top priorities. We are updating our Health & Safety guidelines to ensure a secure work environment for everyone.
-
-Updated Guidelines:
-
-Office Safety:
-- Fire evacuation routes updated (see attached map)
-- First aid kits locations marked on each floor
-- Emergency contact numbers displayed prominently
-- Regular safety drills scheduled monthly
-
-Health Protocols:
-- Hand sanitizing stations available at all entry points
-- Air quality monitoring systems installed
-- Regular cleaning and disinfection schedules
-- Health screening protocols for visitors
-
-Workspace Ergonomics:
-- Adjustable chairs and desks available upon request
-- Proper lighting standards maintained
-- Eye care guidelines for computer users
-- Regular breaks recommended every 2 hours
-
-Incident Reporting:
-- Immediate reporting required for any accidents
-- Online incident reporting system available
-- Investigation procedures for safety concerns
-- Follow-up protocols for affected employees
-
-Mental Health Support:
-- Employee assistance program available 24/7
-- Counseling services provided by qualified professionals
-- Stress management workshops scheduled quarterly
-- Open-door policy with HR for any concerns
-
-Please familiarize yourself with these updated guidelines. Safety training sessions will be conducted next week - attendance is mandatory.
-
-Stay safe,
-Safety Committee
-EcashBook Solutions''',
-      'isRead': false, // UNREAD
-      'priority': 'high',
-    },
-    {
-      'id': '5',
-      'subject': 'Team Building Event - Save the Date',
-      'sender': 'Events Team',
-      'senderEmail': 'events@ecashbook.com',
-      'date': 'Aug 12, 2025',
-      'time': '04:30 PM',
-      'content': '''Hello Everyone!
-
-We're excited to announce our upcoming Team Building Event - a day full of fun, collaboration, and team bonding!
-
-Event Details:
-Date: September 15, 2025 (Saturday)
-Time: 9:00 AM - 6:00 PM
-Venue: Green Valley Resort & Adventure Park
-Theme: "Together We Achieve More"
-
-Activities Planned:
-- Welcome breakfast and team introductions
-- Outdoor adventure challenges
-- Problem-solving team exercises
-- Sports competitions (cricket, volleyball, badminton)
-- Group lunch and networking session
-- Awards and recognition ceremony
-- Evening cultural program and dinner
-
-What to Bring:
-- Comfortable outdoor clothing and shoes
-- Sunscreen and personal essentials
-- Enthusiasm and team spirit!
-- Camera for memorable moments
-
-Transportation:
-- Complimentary bus service from office premises
-- Departure: 8:00 AM sharp
-- Return: Expected by 7:00 PM
-
-RSVP Required:
-Please confirm your attendance by August 25, 2025, through the events portal or email events@ecashbook.com.
-
-Special Notes:
-- Family members are welcome (additional charges apply)
-- Vegetarian and non-vegetarian meal options available
-- All safety protocols will be followed
-- Weather contingency plans in place
-
-This is a fantastic opportunity to strengthen our bonds, celebrate our successes, and create lasting memories together.
-
-Looking forward to seeing everyone there!
-
-Events Team
-EcashBook Solutions''',
-      'isRead': true, // READ
-      'priority': 'low',
-    },
-  ];
+  Future<void> _fetchLetters() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final resp = await HrLetterService.getLetterListForCurrentUser();
+      if (resp['success'] == true) {
+        final List data = resp['data'] as List;
+        final List<Map<String, dynamic>> mapped =
+            data.map<Map<String, dynamic>>((raw) {
+          final m = Map<String, dynamic>.from(raw as Map);
+          final sentAt = (m['sent_at'] ?? '').toString();
+          final parts = sentAt.split(' ');
+          final datePart = parts.isNotEmpty ? parts.first : '';
+          final timePart = parts.length > 1 ? parts[1] : '';
+          final id = (m['id'] ?? '').toString();
+          return {
+            'id': id,
+            'subject': (m['subject'] ?? '').toString(),
+            'sender': 'HR Department',
+            'senderEmail': 'hr@ecashbook.com',
+            'date': datePart,
+            'time': timePart,
+            'content': (m['content'] ?? '').toString(),
+            // temp; will be set below so only latest is unread
+            'isRead': true,
+            'priority': 'medium',
+            'sentAt': _parseSentAt(sentAt),
+          };
+        }).toList();
+        // Determine the latest item by sentAt; mark only it as unread
+        String? latestId;
+        DateTime? latestAt;
+        for (final item in mapped) {
+          final dt = item['sentAt'] as DateTime?;
+          if (dt == null) continue;
+          if (latestAt == null || dt.isAfter(latestAt)) {
+            latestAt = dt;
+            latestId = item['id'] as String;
+          }
+        }
+        if (latestId == null && mapped.isNotEmpty) {
+          latestId = mapped.first['id'] as String; // fallback
+        }
+        for (final item in mapped) {
+          item['isRead'] = (item['id'] != latestId);
+        }
+        // Sort: Unread first, then by sentAt descending (most recent first)
+        mapped.sort((a, b) {
+          final aUnread = !(a['isRead'] as bool);
+          final bUnread = !(b['isRead'] as bool);
+          if (aUnread != bUnread) {
+            return aUnread ? -1 : 1; // unread first
+          }
+          final da = a['sentAt'] as DateTime?;
+          final db = b['sentAt'] as DateTime?;
+          if (da == null && db == null) return 0;
+          if (da == null) return 1;
+          if (db == null) return -1;
+          return db.compareTo(da);
+        });
+        setState(() {
+          hrLetters = mapped;
+        });
+      } else {
+        setState(() {
+          _error = (resp['message'] ?? 'Failed to load letters').toString();
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
+    }
+  }
 
   // MARK LETTER AS READ WHEN OPENED
   void _markAsRead(String letterId) {
     setState(() {
-      final letterIndex = hrLetters.indexWhere((letter) => letter['id'] == letterId); // FIXED: Updated reference
+      final letterIndex = hrLetters.indexWhere(
+          (letter) => letter['id'] == letterId); // FIXED: Updated reference
       if (letterIndex != -1) {
         hrLetters[letterIndex]['isRead'] = true; // FIXED: Updated reference
+        _readIds.add(letterId);
       }
     });
   }
 
   // GET UNREAD COUNT
-  int get _unreadCount => hrLetters.where((letter) => !letter['isRead']).length; // FIXED: Updated reference
+  int get _unreadCount => hrLetters
+      .where((letter) => !letter['isRead'])
+      .length; // FIXED: Updated reference
 
   @override
   Widget build(BuildContext context) {
@@ -347,7 +209,8 @@ EcashBook Solutions''',
                   // DYNAMIC UNREAD COUNT
                   if (_unreadCount > 0)
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: _accentGreen,
                         borderRadius: BorderRadius.circular(20),
@@ -384,7 +247,8 @@ EcashBook Solutions''',
                     )
                   else
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(20),
@@ -415,14 +279,23 @@ EcashBook Solutions''',
 
             // Letters List
             Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: hrLetters.length, // FIXED: Updated reference
-                itemBuilder: (context, index) {
-                  final letter = hrLetters[index]; // FIXED: Updated reference
-                  return _buildLetterCard(context, letter, index);
-                },
-              ),
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                      ? _buildErrorState(_error!)
+                      : hrLetters.isEmpty
+                          ? _buildEmptyState()
+                          : ListView.builder(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 20),
+                              itemCount:
+                                  hrLetters.length, // FIXED: Updated reference
+                              itemBuilder: (context, index) {
+                                final letter = hrLetters[
+                                    index]; // FIXED: Updated reference
+                                return _buildLetterCard(context, letter, index);
+                              },
+                            ),
             ),
           ],
         ),
@@ -430,7 +303,51 @@ EcashBook Solutions''',
     );
   }
 
-  Widget _buildLetterCard(BuildContext context, Map<String, dynamic> letter, int index) {
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.mark_email_read_outlined, size: 48, color: _textLight),
+          const SizedBox(height: 8),
+          Text('No letters found', style: TextStyle(color: _textLight)),
+          const SizedBox(height: 12),
+          ElevatedButton(
+            onPressed: _fetchLetters,
+            child: const Text('Refresh'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState(String message) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error_outline, size: 48, color: _errorRed),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              style: TextStyle(color: _textLight),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(
+              onPressed: _fetchLetters,
+              child: const Text('Retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLetterCard(
+      BuildContext context, Map<String, dynamic> letter, int index) {
     final bool isUnread = !letter['isRead'];
     final Color priorityColor = _getPriorityColor(letter['priority']);
 
@@ -441,7 +358,8 @@ EcashBook Solutions''',
         color: isUnread ? _primaryPurple.withValues(alpha: 0.02) : _cardWhite,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isUnread ? _primaryPurple.withValues(alpha: 0.3) : _borderColor,
+          color:
+              isUnread ? _primaryPurple.withValues(alpha: 0.3) : _borderColor,
           width: isUnread ? 1.5 : 1,
         ),
         boxShadow: [
@@ -507,7 +425,9 @@ EcashBook Solutions''',
                     ),
                     borderRadius: BorderRadius.circular(22),
                     border: isUnread
-                        ? Border.all(color: _primaryPurple.withValues(alpha: 0.3), width: 2)
+                        ? Border.all(
+                            color: _primaryPurple.withValues(alpha: 0.3),
+                            width: 2)
                         : null,
                   ),
                   child: Center(
@@ -536,7 +456,9 @@ EcashBook Solutions''',
                               letter['sender'],
                               style: TextStyle(
                                 fontSize: 14,
-                                fontWeight: isUnread ? FontWeight.w800 : FontWeight.w600,
+                                fontWeight: isUnread
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
                                 color: isUnread ? _primaryPurple : _textDark,
                               ),
                             ),
@@ -545,7 +467,8 @@ EcashBook Solutions''',
                           if (isUnread)
                             Container(
                               margin: const EdgeInsets.only(right: 8),
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
                                 color: _accentOrange,
                                 borderRadius: BorderRadius.circular(8),
@@ -586,7 +509,8 @@ EcashBook Solutions''',
                         letter['subject'],
                         style: TextStyle(
                           fontSize: 15,
-                          fontWeight: isUnread ? FontWeight.w800 : FontWeight.w600,
+                          fontWeight:
+                              isUnread ? FontWeight.w800 : FontWeight.w600,
                           color: isUnread ? _textDark : _textLight,
                         ),
                         maxLines: 1,

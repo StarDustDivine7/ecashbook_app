@@ -5,7 +5,8 @@ import 'task_providers.dart';
 
 class TaskViewPage extends ConsumerStatefulWidget {
   final String taskId;
-  const TaskViewPage({super.key, required this.taskId});
+  final bool isReadOnly;
+  const TaskViewPage({super.key, required this.taskId, this.isReadOnly = false});
 
   // Premium Design Colors
   static const Color _primaryPurple = Color(0xFF6366F1);
@@ -26,12 +27,13 @@ class _TaskViewPageState extends ConsumerState<TaskViewPage> {
   @override
   Widget build(BuildContext context) {
     final detailsAsync = ref.watch(taskDetailsProvider(widget.taskId));
-
     return Scaffold(
       backgroundColor: TaskViewPage._surfaceColor,
       appBar: AppBar(
-        title: const Text('Task Details', style: TextStyle(fontWeight: FontWeight.w600)),
-        backgroundColor: TaskViewPage._cardWhite,
+        toolbarHeight: 80,
+        title: const Text('Task Details',
+            style: TextStyle(fontWeight: FontWeight.w600)),
+        backgroundColor: TaskViewPage._primaryPurple,
         surfaceTintColor: Colors.transparent,
       ),
       body: detailsAsync.when(
@@ -71,36 +73,84 @@ class _TaskViewPageState extends ConsumerState<TaskViewPage> {
       decoration: BoxDecoration(
         color: TaskViewPage._cardWhite,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isOverdue ? TaskViewPage._errorRed.withValues(alpha: 0.3) : TaskViewPage._borderColor),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 15, offset: const Offset(0, 8))],
+        border: Border.all(
+            color: isOverdue
+                ? TaskViewPage._errorRed.withValues(alpha: 0.3)
+                : TaskViewPage._borderColor),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 15,
+              offset: const Offset(0, 8))
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [statusColor, statusColor.withValues(alpha: 0.8)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+              gradient: LinearGradient(
+                  colors: [statusColor, statusColor.withValues(alpha: 0.8)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight),
               borderRadius: BorderRadius.circular(20),
-              boxShadow: [BoxShadow(color: statusColor.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))],
+              boxShadow: [
+                BoxShadow(
+                    color: statusColor.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4))
+              ],
             ),
             child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Container(width: 6, height: 6, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(3))),
+              Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(3))),
               const SizedBox(width: 8),
-              Text(_statusDisplay(task.status), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
+              Text(_statusDisplay(task.status),
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white)),
             ]),
           ),
           const Spacer(),
           if (isOverdue)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(color: TaskViewPage._errorRed, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: TaskViewPage._errorRed.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))]),
-              child: const Text('OVERDUE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: 0.5)),
+              decoration: BoxDecoration(
+                  color: TaskViewPage._errorRed,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                        color: TaskViewPage._errorRed.withValues(alpha: 0.3),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4))
+                  ]),
+              child: const Text('OVERDUE',
+                  style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      letterSpacing: 0.5)),
             ),
         ]),
         const SizedBox(height: 20),
-        Text(task.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: TaskViewPage._textDark, height: 1.2)),
+        Text(task.title,
+            style: const TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: TaskViewPage._textDark,
+                height: 1.2)),
         const SizedBox(height: 12),
-        Text(task.description, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w400, color: TaskViewPage._textDark, height: 1.5)),
+        Text(task.description,
+            style: const TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w400,
+                color: TaskViewPage._textDark,
+                height: 1.5)),
       ]),
     );
   }
@@ -124,13 +174,18 @@ class _TaskViewPageState extends ConsumerState<TaskViewPage> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: TaskViewPage._borderColor),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 4)),
         ],
       ),
       child: Row(children: [
         Icon(icon, size: 18, color: TaskViewPage._textLight),
         const SizedBox(width: 8),
-        Text(label, style: const TextStyle(color: TaskViewPage._textDark, fontWeight: FontWeight.w600)),
+        Text(label,
+            style: const TextStyle(
+                color: TaskViewPage._textDark, fontWeight: FontWeight.w600)),
       ]),
     );
   }
@@ -143,7 +198,10 @@ class _TaskViewPageState extends ConsumerState<TaskViewPage> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: TaskViewPage._borderColor),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 4)),
         ],
       ),
       child: Icon(icon, size: 18, color: TaskViewPage._textLight),
@@ -160,23 +218,43 @@ class _TaskViewPageState extends ConsumerState<TaskViewPage> {
         color: TaskViewPage._cardWhite,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: TaskViewPage._borderColor),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 15, offset: const Offset(0, 8))],
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 15,
+              offset: const Offset(0, 8))
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: TaskViewPage._primaryPurple.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.info_outline_rounded, color: TaskViewPage._primaryPurple, size: 20)),
+          Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                  color: TaskViewPage._primaryPurple.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8)),
+              child: const Icon(Icons.info_outline_rounded,
+                  color: TaskViewPage._primaryPurple, size: 20)),
           const SizedBox(width: 12),
-          const Text('Task Information', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: TaskViewPage._textDark)),
+          const Text('Task Information',
+              style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: TaskViewPage._textDark)),
         ]),
         const SizedBox(height: 20),
-        _buildDetailRow('Assigned By', task.addedByName, Icons.person_outline_rounded),
-        _buildDetailRow('Due Date', _formatDate(task.dueDate), Icons.event_rounded, isDeadline: true, task: task),
-        _buildDetailRow('Days Remaining', remainingDays, Icons.schedule_rounded, isDeadline: task.isOverdue),
+        _buildDetailRow(
+            'Assigned By', task.addedByName, Icons.person_outline_rounded),
+        _buildDetailRow(
+            'Due Date', _formatDate(task.dueDate), Icons.event_rounded,
+            isDeadline: true, task: task),
+        _buildDetailRow('Days Remaining', remainingDays, Icons.schedule_rounded,
+            isDeadline: task.isOverdue),
       ]),
     );
   }
 
-  Widget _buildDetailRow(String label, String value, IconData icon, {bool isDeadline = false, TaskDetailsData? task}) {
+  Widget _buildDetailRow(String label, String value, IconData icon,
+      {bool isDeadline = false, TaskDetailsData? task}) {
     Color textColor = TaskViewPage._textDark;
     Color valueColor = TaskViewPage._textLight;
     if (isDeadline && (task?.isOverdue == true)) {
@@ -186,12 +264,25 @@ class _TaskViewPageState extends ConsumerState<TaskViewPage> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(children: [
-        Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: textColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)), child: Icon(icon, color: textColor, size: 16)),
+        Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+                color: textColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(6)),
+            child: Icon(icon, color: textColor, size: 16)),
         const SizedBox(width: 12),
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: textColor)),
+        Expanded(
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label,
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w500, color: textColor)),
           const SizedBox(height: 2),
-          Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: valueColor)),
+          Text(value,
+              style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: valueColor)),
         ])),
       ]),
     );
@@ -256,7 +347,8 @@ class _TaskViewPageState extends ConsumerState<TaskViewPage> {
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: statusColor.withValues(alpha: 0.3), width: 2),
+              border: Border.all(
+                  color: statusColor.withValues(alpha: 0.3), width: 2),
               boxShadow: [
                 BoxShadow(
                     color: statusColor.withValues(alpha: 0.1),
@@ -272,63 +364,67 @@ class _TaskViewPageState extends ConsumerState<TaskViewPage> {
                     color: statusColor, size: 26),
                 isExpanded: true,
                 borderRadius: BorderRadius.circular(12),
-                dropdownColor: TaskViewPage._cardWhite,
-                items: items.map((s) => DropdownMenuItem<String>(
-                  value: s,
-                  child: Row(children: [
-                    Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [
-                              _getStatusColor(s),
-                              _getStatusColor(s).withValues(alpha: 0.8)
-                            ],
-                          ),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(_statusIcon(s),
-                            color: Colors.white, size: 18)),
-                    const SizedBox(width: 12),
-                    Text(s,
-                        style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: _getStatusColor(s))),
-                  ]),
-                )).toList(),
-                onChanged: (val) async {
-                  if (val == null || val == current) return;
-                  final messenger = ScaffoldMessenger.of(context);
-                  try {
-                    // Completed requires completedDate param
-                    String? completed;
-                    if (val.toLowerCase() == 'completed') {
-                      final now = DateTime.now();
-                      completed =
-                      '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
-                          '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-                    }
+                dropdownColor: Colors.white,
+                items: items
+                    .map((s) => DropdownMenuItem<String>(
+                          value: s,
+                          child: Row(children: [
+                            Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      _getStatusColor(s),
+                                      _getStatusColor(s).withValues(alpha: 0.8)
+                                    ],
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(_statusIcon(s),
+                                    color: Colors.white, size: 18)),
+                            const SizedBox(width: 12),
+                            Text(s,
+                                style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: _getStatusColor(s))),
+                          ]),
+                        ))
+                    .toList(),
+                onChanged: widget.isReadOnly
+                    ? null
+                    : (val) async {
+                        if (val == null || val == current) return;
+                        final messenger = ScaffoldMessenger.of(context);
+                        try {
+                          // Completed requires completedDate param
+                          String? completed;
+                          if (val.toLowerCase() == 'completed') {
+                            final now = DateTime.now();
+                            completed =
+                                '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+                                '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+                          }
 
-                    final api = ref.read(taskApiServiceProvider);
-                    final ok = await api.updateTaskStatus(
-                        taskId: widget.taskId,
-                        status: val,
-                        completedDate: completed);
-                    if (ok) {
-                      messenger.showSnackBar(
-                          const SnackBar(content: Text('Task status updated')));
-                      ref.invalidate(taskDetailsProvider(widget.taskId));
-                      setState(() {});
-                    } else {
-                      messenger.showSnackBar(
-                          const SnackBar(content: Text('Update failed')));
-                    }
-                  } catch (e) {
-                    messenger.showSnackBar(
-                        SnackBar(content: Text('Error: ${e.toString()}')));
-                  }
-                },
+                          final api = ref.read(taskApiServiceProvider);
+                          final ok = await api.updateTaskStatus(
+                              taskId: widget.taskId,
+                              status: val,
+                              completedDate: completed);
+                          if (ok) {
+                            messenger.showSnackBar(
+                                const SnackBar(content: Text('Task status updated')));
+                            ref.invalidate(taskDetailsProvider(widget.taskId));
+                            setState(() {});
+                          } else {
+                            messenger.showSnackBar(
+                                const SnackBar(content: Text('Update failed')));
+                          }
+                        } catch (e) {
+                          messenger.showSnackBar(
+                              SnackBar(content: Text('Error: ${e.toString()}')));
+                        }
+                      },
               ),
             ),
           ),
@@ -336,7 +432,6 @@ class _TaskViewPageState extends ConsumerState<TaskViewPage> {
       ),
     );
   }
-
 
   Widget _buildCard({required Widget child}) {
     return Container(
@@ -364,14 +459,17 @@ class _TaskViewPageState extends ConsumerState<TaskViewPage> {
         Text(
           title,
           style: const TextStyle(
-              fontSize: 16, fontWeight: FontWeight.w500, color: TaskViewPage._textDark),
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              color: TaskViewPage._textDark),
         ),
         Text(
           value,
           style: TextStyle(
             fontSize: 16,
             color: valueColor ?? TaskViewPage._textLight,
-            fontWeight: valueColor != null ? FontWeight.w600 : FontWeight.normal,
+            fontWeight:
+                valueColor != null ? FontWeight.w600 : FontWeight.normal,
           ),
         ),
       ],
@@ -406,8 +504,18 @@ class _TaskViewPageState extends ConsumerState<TaskViewPage> {
 
   String _formatDate(DateTime date) {
     final months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
     ];
     return '${date.day} ${months[date.month - 1]} ${date.year}';
   }

@@ -11,21 +11,29 @@ import '../features/hr_letter/hr_letter_list.dart';
 import '../features/leave/leave_list.dart';
 import '../features/leave/leave_status.dart';
 import '../features/tasks/task_view.dart';
+import '../features/expenditure/claims_list.dart';
+import '../features/supply/supply_list.dart';
 import 'bottom_menu.dart';
 import 'header.dart';
 import 'profile_page.dart';
 import 'side_menu.dart';
+import 'bottom_sheet_host.dart';
+import '../features/profile/personal_info_page.dart';
+import '../features/profile/help_support_page.dart';
+import '../features/profile/about_page.dart';
 
 class MainLayout extends StatefulWidget {
   final int initialIndex;
   final String? taskId; // For TaskViewPage
   final String? requestId; // For LeaveStatusPage
+  final bool isReadOnlyTask; // For making task view read-only
 
   const MainLayout({
     super.key,
     this.initialIndex = 2, // Default to Dashboard (index 2)
     this.taskId,
     this.requestId,
+    this.isReadOnlyTask = false,
   });
 
   @override
@@ -37,6 +45,13 @@ class _MainLayoutState extends State<MainLayout> {
   late PageController _pageController;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   DateTime? _lastBackPressTime;
+  PersistentBottomSheetController? _bottomSheetController;
+  bool _justClosedSheet = false;
+
+  // Double-tap detection for refresh
+  DateTime? _lastTabTapTime;
+  int? _lastTappedIndex;
+  int _pageRefreshKey = 0; // Key to force page rebuild
 
   @override
   void initState() {
@@ -53,38 +68,70 @@ class _MainLayoutState extends State<MainLayout> {
 
   // Page titles for all 11 pages
   final List<String> _pageTitles = [
-    'Generate Payslip',    // 0 - Payslip
-    'Task Management',     // 1 - Tasks
-    'Dashboard',           // 2 - Dashboard (default)
-    'Leave Requests',      // 3 - Leave List
-    'My Profile',          // 4 - Profile
-    'Attendance History',  // 5 - Attendance
-    'HR Letters',          // 6 - HR Letters
-    'Apply for Leave',     // 7-  Apply for leave
-    'Leave Status',        // 8 - Leave Status
-    'Task Details',        // 9 - Task View
-    'Reserved',            // 10 - Reserved for future
+    'Generate Payslip', // 0 - Payslip
+    'Task Management', // 1 - Tasks
+    'Dashboard', // 2 - Dashboard (default)
+    'Leave Requests', // 3 - Leave List
+    'My Profile', // 4 - Profile
+    'Attendance History', // 5 - Attendance
+    'HR Letters', // 6 - HR Letters
+    'Apply for Leave', // 7-  Apply for leave
+    'Leave Status', // 8 - Leave Status
+    'Task Details', // 9 - Task View
+    'Expenditure Claims', // 10 - Expenditure Claims
+    'Supply Requisitions', // 11 - Supply Requisitions
+    'Personal Information', // 12 - Personal Info
+    'Help & Support', // 13 - Help & Support
+    'About', // 14 - About
   ];
 
   // All pages - getter to handle conditional parameters
   List<Widget> get _pages => [
-    const payslip.PayslipPage(),     // 0 - Payslip
-    const tasks.TaskListPage(),      // 1 - Tasks
-    const Dashboard(),               // 2 - Dashboard (default)
-    const LeaveListPage(),           // 3 - Leave List
-    const ProfilePage(),             // 4 - Profile
-    const AttendancePage(),          // 5 - Attendance
-    const HrLetterListPage(),        // 6 - HR Letters
-    const ApplyLeavePage(),          // 7 - Apply Leave
-    // Conditional pages with parameters
-    widget.requestId != null
-        ? LeaveStatusPage(requestId: widget.requestId!)  // 8 - Leave Status
-        : const _PlaceholderPage(title: 'Leave Status', message: 'Request ID required'),
-    widget.taskId != null
-        ? TaskViewPage(taskId: widget.taskId!)           // 9 - Task View
-        : const _PlaceholderPage(title: 'Task Details', message: 'Task ID required'),
-    const _PlaceholderPage(title: 'Reserved', message: 'Feature coming soon'),  // 10 - Reserved
-  ];
+        const payslip.PayslipPage(), // 0 - Payslip
+        const tasks.TaskListPage(), // 1 - Tasks
+        const Dashboard(), // 2 - Dashboard (default)
+        const LeaveListPage(), // 3 - Leave List
+        const ProfilePage(), // 4 - Profile
+        const AttendancePage(), // 5 - Attendance
+        const HrLetterListPage(), // 6 - HR Letters
+        const ApplyLeavePage(), // 7 - Apply Leave
+        // Conditional pages with parameters
+        widget.requestId != null
+            ? LeaveStatusPage(requestId: widget.requestId!) // 8 - Leave Status
+            : const _PlaceholderPage(
+                title: 'Leave Status', message: 'Request ID required'),
+        widget.taskId != null
+            ?
+        TaskViewPage(
+                taskId: widget.taskId!,
+                isReadOnly: widget.isReadOnlyTask,
+              ) // 9 - Task View
+            : const _PlaceholderPage(
+                title: 'Task Details', message: 'Task ID required'),
+        const ClaimsListPage(), // 10 - Expenditure Claims
+        const SupplyListPage(), // 11 - Supply Requisitions
+        const PersonalInfoPage(), // 12 - Personal Info
+        const HelpSupportPage(), // 13 - Help & Support
+        const AboutPage(), // 14 - About
+      ];
+
+  // Handle navigation from side menu or other sources
+  void _navigateToIndex(int index) {
+    // Close any open bottom sheet when navigating
+    if (_bottomSheetController != null) {
+      _bottomSheetController!.close();
+      _bottomSheetController = null;
+    }
+    
+    setState(() {
+      _currentIndex = index;
+      // Reset double-tap tracking when changing pages
+      _lastTabTapTime = null;
+      _lastTappedIndex = null;
+    });
+    
+    HapticFeedback.lightImpact();
+  }
 
   void _onTabTapped(int index) {
     // Validate index range
@@ -92,37 +139,86 @@ class _MainLayoutState extends State<MainLayout> {
       return;
     }
 
+    // Close any open bottom sheet when navigating
+    if (_bottomSheetController != null) {
+      _bottomSheetController!.close();
+      _bottomSheetController = null;
+    }
+
+    final now = DateTime.now();
+
     if (_currentIndex == index) {
-      // Same tab tapped - provide feedback
-      HapticFeedback.lightImpact();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.refresh, color: Colors.white, size: 16),
-              const SizedBox(width: 8),
-              Text('${_pageTitles[index]} refreshed'),
-            ],
+      // Same tab tapped - check for double tap
+      if (_lastTappedIndex == index &&
+          _lastTabTapTime != null &&
+          now.difference(_lastTabTapTime!) <
+              const Duration(milliseconds: 500)) {
+        // Double tap detected - refresh the page
+        _refreshCurrentPage();
+
+        // Reset double-tap tracking
+        _lastTabTapTime = null;
+        _lastTappedIndex = null;
+      } else {
+        // First tap on same tab - start tracking
+        _lastTabTapTime = now;
+        _lastTappedIndex = index;
+
+        HapticFeedback.lightImpact();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.info_outline, color: Colors.white, size: 16),
+                const SizedBox(width: 8),
+                Text('Tap again to refresh ${_pageTitles[index]}'),
+              ],
+            ),
+            duration: const Duration(milliseconds: 1500),
+            backgroundColor: const Color(0xFF422F90),
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
           ),
-          duration: const Duration(milliseconds: 1500),
-          backgroundColor: const Color(0xFF422F90),
-          behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.all(16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-        ),
-      );
+        );
+      }
       return;
     }
 
     // Navigate to different page
+    _navigateToIndex(index);
+  }
+
+  void _refreshCurrentPage() {
+    HapticFeedback.mediumImpact();
+
     setState(() {
-      _currentIndex = index;
+      // Increment key to force page rebuild
+      _pageRefreshKey++;
     });
 
-    HapticFeedback.lightImpact();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.refresh, color: Colors.white, size: 16),
+            const SizedBox(width: 8),
+            Text('${_pageTitles[_currentIndex]} refreshed'),
+          ],
+        ),
+        duration: const Duration(milliseconds: 1500),
+        backgroundColor: Colors.green.shade600,
+        behavior: SnackBarBehavior.floating,
+        //   margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+    );
   }
 
   // Handle back button with smart navigation
@@ -136,7 +232,8 @@ class _MainLayoutState extends State<MainLayout> {
     // Double tap to exit from Dashboard
     final currentTime = DateTime.now();
     if (_lastBackPressTime == null ||
-        currentTime.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+        currentTime.difference(_lastBackPressTime!) >
+            const Duration(seconds: 2)) {
       _lastBackPressTime = currentTime;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -165,6 +262,22 @@ class _MainLayoutState extends State<MainLayout> {
       canPop: false,
       onPopInvokedWithResult: (didPop, result) async {
         if (!didPop) {
+          // If there is any modal route/sheet/dialog on top, let Navigator pop it first
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).maybePop();
+            return;
+          }
+          // If a persistent bottom sheet is open, close it first
+          if (_bottomSheetController != null) {
+            setState(() => _justClosedSheet = true);
+            _bottomSheetController!.close();
+            return;
+          }
+          // Consume the back press right after a sheet was closed
+          if (_justClosedSheet) {
+            setState(() => _justClosedSheet = false);
+            return;
+          }
           final shouldPop = await _handleBackPress();
           if (shouldPop && context.mounted) {
             SystemNavigator.pop();
@@ -174,10 +287,8 @@ class _MainLayoutState extends State<MainLayout> {
       child: Scaffold(
         key: _scaffoldKey,
         backgroundColor: Colors.white,
-
         // Side drawer
         drawer: const SideMenu(),
-
         // Dynamic header
         appBar: Header(
           pageTitle: _pageTitles[_currentIndex],
@@ -186,13 +297,52 @@ class _MainLayoutState extends State<MainLayout> {
             HapticFeedback.lightImpact();
           },
         ),
-
-        // Main content - No swipe, only button navigation
-        body: IndexedStack(
-          index: _currentIndex,
-          children: _pages,
+        // Main content wrapped with BottomSheetHost so children can show persistent sheets
+        body: BottomSheetHost(
+          show: (builder) {
+            final state = _scaffoldKey.currentState;
+            if (state == null) {
+              throw StateError('ScaffoldState is not available');
+            }
+            // Close any existing sheet before opening a new one
+            _bottomSheetController?.close();
+            final controller = state.showBottomSheet(
+              (ctx) {
+                return PopScope(
+                  canPop: false,
+                  onPopInvokedWithResult: (didPop, result) async {
+                    // Intercept back press to close only the sheet
+                    if (_bottomSheetController != null) {
+                      _bottomSheetController!.close();
+                    }
+                  },
+                  child: Builder(builder: builder),
+                );
+              },
+              backgroundColor: Colors.white,
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+              ),
+              elevation: 8,
+            );
+            setState(() {
+              _bottomSheetController = controller;
+            });
+            controller.closed.whenComplete(() {
+              if (mounted) {
+                setState(() {
+                  _bottomSheetController = null;
+                });
+              }
+            });
+            return controller;
+          },
+          child: IndexedStack(
+            key: ValueKey(_pageRefreshKey), // Force rebuild when key changes
+            index: _currentIndex,
+            children: _pages,
+          ),
         ),
-
         // Bottom navigation
         bottomNavigationBar: BottomMenuBar(
           currentIndex: _currentIndex,
@@ -271,7 +421,8 @@ class _PlaceholderPage extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF422F90),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(8),
                   ),

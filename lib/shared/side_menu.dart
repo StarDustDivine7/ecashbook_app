@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-import '../features/auth/auth_provider.dart';
+import '../core/services/auth_service.dart';
+import '../features/reviews/review_list_page.dart';
 import '../features/dashboard/dashboard_employee_provider.dart';
 import '../core/utils/logout_handler.dart';
 import 'main_layout.dart';
@@ -15,7 +15,7 @@ class SideMenu extends ConsumerWidget {
     // Watch employee data from dashboard provider
     final employeeState = ref.watch(dashboardEmployeeProvider);
     final employeeDetails = employeeState.details;
-    
+
     // Fetch employee data if not loaded or refresh if needed
     if (employeeDetails == null && !employeeState.loading) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -89,42 +89,65 @@ class SideMenu extends ConsumerWidget {
                         ),
                         child: ClipOval(
                           child: employeeState.loading
-                            ? Container(
-                                width: 55,
-                                height: 55,
-                                decoration: const BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF422F90)),
-                                ),
-                              )
-                            : employeeDetails?.profileImg != null && employeeDetails!.profileImg!.isNotEmpty
-                              ? Image.network(
-                                  employeeDetails.profileImg!,
+                              ? Container(
                                   width: 55,
                                   height: 55,
-                                  fit: BoxFit.cover,
-                                  loadingBuilder: (context, child, loadingProgress) {
-                                    if (loadingProgress == null) return child;
-                                    return Container(
+                                  decoration: const BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                        Color(0xFF422F90)),
+                                  ),
+                                )
+                              : employeeDetails?.profileImg != null &&
+                                      employeeDetails!.profileImg!.isNotEmpty
+                                  ? Image.network(
+                                      employeeDetails.profileImg!,
                                       width: 55,
                                       height: 55,
-                                      decoration: const BoxDecoration(
-                                        color: Colors.white,
-                                        shape: BoxShape.circle,
-                                      ),
-                                      child: const CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF422F90)),
-                                      ),
-                                    );
-                                  },
-                                  errorBuilder: (context, error, stackTrace) {
-                                    // Fallback if network image fails
-                                    return Container(
+                                      fit: BoxFit.cover,
+                                      loadingBuilder:
+                                          (context, child, loadingProgress) {
+                                        if (loadingProgress == null)
+                                          return child;
+                                        return Container(
+                                          width: 55,
+                                          height: 55,
+                                          decoration: const BoxDecoration(
+                                            color: Colors.white,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child:
+                                              const CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor:
+                                                AlwaysStoppedAnimation<Color>(
+                                                    Color(0xFF422F90)),
+                                          ),
+                                        );
+                                      },
+                                      errorBuilder:
+                                          (context, error, stackTrace) {
+                                        // Fallback if network image fails
+                                        return Container(
+                                          width: 55,
+                                          height: 55,
+                                          decoration: const BoxDecoration(
+                                            color: Colors.white,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          child: const Icon(
+                                            Icons.person,
+                                            color: Color(0xFF422F90),
+                                            size: 30,
+                                          ),
+                                        );
+                                      },
+                                    )
+                                  : Container(
                                       width: 55,
                                       height: 55,
                                       decoration: const BoxDecoration(
@@ -136,22 +159,7 @@ class SideMenu extends ConsumerWidget {
                                         color: Color(0xFF422F90),
                                         size: 30,
                                       ),
-                                    );
-                                  },
-                                )
-                              : Container(
-                                  width: 55,
-                                  height: 55,
-                                  decoration: const BoxDecoration(
-                                    color: Colors.white,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.person,
-                                    color: Color(0xFF422F90),
-                                    size: 30,
-                                  ),
-                                ),
+                                    ),
                         ),
                       ),
 
@@ -165,11 +173,11 @@ class SideMenu extends ConsumerWidget {
                           children: [
                             // Name - Dynamic from API
                             Text(
-                              employeeState.loading 
-                                ? 'Loading...' 
-                                : (employeeDetails?.name.isNotEmpty == true 
-                                    ? employeeDetails!.name 
-                                    : 'Employee'),
+                              employeeState.loading
+                                  ? 'Loading...'
+                                  : (employeeDetails?.name.isNotEmpty == true
+                                      ? employeeDetails!.name
+                                      : 'Employee'),
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 16, // Reduced from 18
@@ -181,11 +189,13 @@ class SideMenu extends ConsumerWidget {
 
                             // Job Role - Dynamic from API
                             Text(
-                              employeeState.loading 
-                                ? 'Loading...' 
-                                : (employeeDetails?.designationName.isNotEmpty == true 
-                                    ? '${employeeDetails!.designationName} • ${employeeDetails.employeeId}' 
-                                    : 'Employee'),
+                              employeeState.loading
+                                  ? 'Loading...'
+                                  : (employeeDetails
+                                              ?.designationName.isNotEmpty ==
+                                          true
+                                      ? '${employeeDetails!.designationName} • ${employeeDetails.employeeId}'
+                                      : 'Employee'),
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.9),
                                 fontSize: 12, // Reduced from 13
@@ -197,11 +207,11 @@ class SideMenu extends ConsumerWidget {
 
                             // Email - Dynamic from API
                             Text(
-                              employeeState.loading 
-                                ? 'Loading...' 
-                                : (employeeDetails?.email.isNotEmpty == true 
-                                    ? employeeDetails!.email 
-                                    : 'No email'),
+                              employeeState.loading
+                                  ? 'Loading...'
+                                  : (employeeDetails?.email.isNotEmpty == true
+                                      ? employeeDetails!.email
+                                      : 'No email'),
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.8),
                                 fontSize: 10, // Reduced from 11
@@ -278,36 +288,18 @@ class SideMenu extends ConsumerWidget {
                     },
                   ),
 
-                  // ✅ 5. Leave Management (Expandable) - UPDATED
-                  _buildExpandableMenuItem(
+                  // ✅ 5. Leave Management (Single item -> Leave List)
+                  _buildMenuItem(
                     context,
                     icon: Icons.event_note,
                     title: 'Leave Management',
                     gradient: const LinearGradient(
                       colors: [Color(0xFFFF7043), Color(0xFFE64A19)],
                     ),
-                    children: [
-                      // ✅ 5.1 Leave Requests
-                      _buildSubMenuItem(
-                        context,
-                        title: 'Leave Requests',
-                        icon: Icons.assignment,
-                        onTap: () {
-                          Navigator.pop(context);
-                          _navigateToMainLayout(context, 7); // Leave List index
-                        },
-                      ),
-                      // ✅ 5.2 Apply for Leave
-                      _buildSubMenuItem(
-                        context,
-                        title: 'Apply for Leave',
-                        icon: Icons.add_circle_outline,
-                        onTap: () {
-                          Navigator.pop(context);
-                          _navigateToMainLayout(context, 3); // Apply Leave index
-                        },
-                      ),
-                    ],
+                    onTap: () {
+                      Navigator.pop(context);
+                      _navigateToMainLayout(context, 3); // Leave List index
+                    },
                   ),
 
                   // ✅ 6. HR Letter
@@ -324,30 +316,91 @@ class SideMenu extends ConsumerWidget {
                     },
                   ),
 
-                  // Divider
-                  Container(
-                    margin: const EdgeInsets.symmetric(vertical: 15),
-                    child: Divider(
-                      color: Colors.grey.shade300,
-                      thickness: 1,
-                      indent: 20,
-                      endIndent: 20,
-                    ),
-                  ),
-
-                  // Help & Support
+                  // ✅ New: Performance & Review
                   _buildMenuItem(
                     context,
-                    icon: Icons.help_outline,
-                    title: 'Help & Support',
+                    icon: Icons.bar_chart_rounded,
+                    title: 'Performance & Review',
                     gradient: const LinearGradient(
-                      colors: [Color(0xFF8E24AA), Color(0xFF6A1B9A)],
+                      colors: [Color(0xFF7E57C2), Color(0xFF5E35B1)],
+                    ),
+                    onTap: () async {
+                      Navigator.pop(context);
+                      final empId = employeeDetails?.employeeId ?? '';
+                      final secure = await AuthService.getSecure() ?? '';
+                      if (!context.mounted) return;
+                      if (empId.isEmpty || secure.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content:
+                                  Text('Missing employee or secure token')),
+                        );
+                        return;
+                      }
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              ReviewListPage(employeeId: empId, secure: secure),
+                        ),
+                      );
+                    },
+                  ),
+
+                  // ✅ New: Expenditure Claims
+                  _buildMenuItem(
+                    context,
+                    icon: Icons.request_quote_rounded,
+                    title: 'Expenditure Claims',
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF26A69A), Color(0xFF00897B)],
                     ),
                     onTap: () {
                       Navigator.pop(context);
-                      _showHelpDialog(context);
+                      _navigateToMainLayout(
+                          context, 10); // Expenditure Claims index
                     },
                   ),
+
+                  // ✅ New: Supply Requisitions
+                  _buildMenuItem(
+                    context,
+                    icon: Icons.inventory_2_rounded,
+                    title: 'Supply Requisitions',
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFFEF5350), Color(0xFFE53935)],
+                    ),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _navigateToMainLayout(
+                          context, 11); // Supply Requisitions index
+                    },
+                  ),
+
+                  // Divider
+                  // Container(
+                  //   margin: const EdgeInsets.symmetric(vertical: 15),
+                  //   child: Divider(
+                  //     color: Colors.grey.shade300,
+                  //     thickness: 1,
+                  //     indent: 20,
+                  //     endIndent: 20,
+                  //   ),
+                  // ),
+
+                  // Help & Support
+                  // _buildMenuItem(
+                  //   context,
+                  //   icon: Icons.help_outline,
+                  //   title: 'Help & Support',
+                  //   gradient: const LinearGradient(
+                  //     colors: [Color(0xFF8E24AA), Color(0xFF6A1B9A)],
+                  //   ),
+                  //   onTap: () {
+                  //     Navigator.pop(context);
+                  //     _showHelpDialog(context);
+                  //   },
+                  // ),
 
                   const SizedBox(height: 20),
                 ],
@@ -393,6 +446,7 @@ class SideMenu extends ConsumerWidget {
                 ),
               ),
             ),
+            const SizedBox(height: 20)
           ],
         ),
       ),
@@ -401,6 +455,12 @@ class SideMenu extends ConsumerWidget {
 
   // ✅ NAVIGATION HELPER - Navigate to MainLayout with specific index
   void _navigateToMainLayout(BuildContext context, int index) {
+    // Close the drawer first
+    if (Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+
+    // Navigate using MaterialPageRoute for more reliable navigation
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
@@ -410,12 +470,12 @@ class SideMenu extends ConsumerWidget {
   }
 
   Widget _buildMenuItem(
-      BuildContext context, {
-        required IconData icon,
-        required String title,
-        required Gradient gradient,
-        required VoidCallback onTap,
-      }) {
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required Gradient gradient,
+    required VoidCallback onTap,
+  }) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
       decoration: BoxDecoration(
@@ -461,103 +521,6 @@ class SideMenu extends ConsumerWidget {
                       fontWeight: FontWeight.w500,
                       fontSize: 13, // Reduced from 15
                       color: Color(0xFF2C3E50),
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildExpandableMenuItem(
-      BuildContext context, {
-        required IconData icon,
-        required String title,
-        required Gradient gradient,
-        required List<Widget> children,
-      }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 5,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Theme(
-        data: Theme.of(context).copyWith(
-          dividerColor: Colors.transparent, // Remove divider lines
-        ),
-        child: ExpansionTile(
-          leading: Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              gradient: gradient,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              icon,
-              color: Colors.white,
-              size: 18, // Reduced icon size
-            ),
-          ),
-          title: Text(
-            title,
-            style: const TextStyle(
-              fontWeight: FontWeight.w500,
-              fontSize: 13, // Reduced from 15
-              color: Color(0xFF2C3E50),
-            ),
-          ),
-          iconColor: const Color(0xFF422F90),
-          collapsedIconColor: const Color(0xFF422F90),
-          childrenPadding: const EdgeInsets.only(bottom: 10),
-          children: children,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSubMenuItem(
-      BuildContext context, {
-        required String title,
-        required IconData icon,
-        required VoidCallback onTap,
-      }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(10),
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            child: Row(
-              children: [
-                const SizedBox(width: 40), // Indent for sub-items
-                Icon(
-                  icon,
-                  size: 14, // Reduced icon size
-                  color: Colors.grey.shade600,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 12, // Reduced from 14
-                      color: Colors.grey.shade700,
-                      fontWeight: FontWeight.w400,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -616,7 +579,7 @@ class SideMenu extends ConsumerWidget {
               ),
               onPressed: () async {
                 Navigator.pop(context); // Close dialog immediately
-                
+
                 // Use the new logout handler
                 await LogoutHandler.performLogout(context, ref);
               },
@@ -627,85 +590,6 @@ class SideMenu extends ConsumerWidget {
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showHelpDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.help_outline, color: Color(0xFF422F90)),
-            SizedBox(width: 10),
-            Text(
-              'Help & Support',
-              style: TextStyle(
-                color: Color(0xFF422F90),
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
-          ],
-        ),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Need assistance? Contact our support team:',
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-            ),
-            SizedBox(height: 15),
-            Row(
-              children: [
-                Icon(Icons.email, color: Color(0xFF422F90), size: 18),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'support@ecashbook.com',
-                    style: TextStyle(fontSize: 13),
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(Icons.phone, color: Color(0xFF422F90), size: 18),
-                SizedBox(width: 8),
-                Text(
-                  '+91 98765 43210',
-                  style: TextStyle(fontSize: 13),
-                ),
-              ],
-            ),
-            SizedBox(height: 15),
-            Text(
-              'App Version: 1.0.0',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey,
-                fontStyle: FontStyle.italic,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text(
-              'Close',
-              style: TextStyle(
-                fontSize: 14,
-                color: Color(0xFF422F90),
-                fontWeight: FontWeight.w600,
               ),
             ),
           ),

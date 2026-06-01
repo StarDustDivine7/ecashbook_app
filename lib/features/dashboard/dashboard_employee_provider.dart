@@ -39,7 +39,8 @@ class DashboardEmployeeNotifier extends StateNotifier<DashboardEmployeeState> {
       final secure = await AuthService.getSecure() ?? '';
       final user = await AuthService.getSavedUser();
       final empId = user?.employeeId ?? '';
-      final todayDate = overrideDate ?? DateTime.now().toIso8601String().substring(0, 10);
+      final todayDate =
+          overrideDate ?? DateTime.now().toIso8601String().substring(0, 10);
 
       final resp = await AuthService.fetchEmployeeDetails(
         empId: empId,
@@ -47,14 +48,17 @@ class DashboardEmployeeNotifier extends StateNotifier<DashboardEmployeeState> {
         secure: secure,
       );
       if (!resp.success) {
+        // Preserve the actual server message so auth errors can be detected upstream
         state = state.copyWith(loading: false, error: resp.message);
         return;
       }
       await prefs.setString('last_employee_details_date', resp.data.date);
       state = state.copyWith(loading: false, details: resp.data, error: null);
-    } catch (e) {
-      debugPrint('Employee details load error: $e');
-      state = state.copyWith(loading: false, error: 'Failed to load employee details');
+    } on Exception catch (e) {
+      final msg = e.toString();
+      debugPrint('Employee details load error: $msg');
+      // Preserve the original message so auth errors (401, token) are detectable
+      state = state.copyWith(loading: false, error: msg);
     }
   }
 
@@ -64,6 +68,7 @@ class DashboardEmployeeNotifier extends StateNotifier<DashboardEmployeeState> {
 }
 
 final dashboardEmployeeProvider =
-StateNotifierProvider<DashboardEmployeeNotifier, DashboardEmployeeState>((ref) {
+    StateNotifierProvider<DashboardEmployeeNotifier, DashboardEmployeeState>(
+        (ref) {
   return DashboardEmployeeNotifier();
 });

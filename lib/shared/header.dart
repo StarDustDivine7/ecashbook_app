@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'notification_modal.dart'; // Add this import
+// import 'notification_modal.dart'; // Temporarily disabled per request
 
 class Header extends StatelessWidget implements PreferredSizeWidget {
   final String pageTitle;
@@ -78,8 +78,141 @@ class Header extends StatelessWidget implements PreferredSizeWidget {
               GestureDetector(
                 onTap: onNotificationPressed ??
                     () {
-                      // Show notification modal instead of snackbar
-                      NotificationModal.show(context);
+                      // Notification navigation temporarily disabled as requested
+                      // NotificationModal.show(context);
+
+                      showDialog(
+                        context: context,
+                        barrierDismissible: true,
+                        builder: (ctx) {
+                          return Dialog(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(20),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.05),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 10),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Header
+                                  Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
+                                    decoration: const BoxDecoration(
+                                      gradient: LinearGradient(
+                                        colors: [Color(0xFF422F90), Color(0xFF5A4FCF)],
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                      ),
+                                      borderRadius: BorderRadius.only(
+                                        topLeft: Radius.circular(20),
+                                        topRight: Radius.circular(20),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          padding: const EdgeInsets.all(10),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withValues(alpha: 0.2),
+                                            borderRadius: BorderRadius.circular(12),
+                                          ),
+                                          child: const Icon(Icons.construction_rounded, color: Colors.white),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        const Expanded(
+                                          child: Text(
+                                            'Coming Soon',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w800,
+                                              fontSize: 18,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+
+                                  const SizedBox(height: 16),
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                                    child: Column(
+                                      children: const [
+                                        Text(
+                                          'Notifications are under construction',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w700,
+                                            color: Color(0xFF2C3E50),
+                                          ),
+                                        ),
+                                        SizedBox(height: 8),
+                                        Text(
+                                          'We are working hard to bring you a great experience. Please stay tuned and thanks for your support!',
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            color: Color(0xFF64748B),
+                                            height: 1.4,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+
+                                  const SizedBox(height: 16),
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: OutlinedButton(
+                                            onPressed: () => Navigator.of(ctx).pop(),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: const Color(0xFF422F90),
+                                              side: const BorderSide(color: Color(0xFF422F90)),
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                              padding: const EdgeInsets.symmetric(vertical: 12),
+                                            ),
+                                            child: const Text('Close'),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: ElevatedButton(
+                                            onPressed: () => Navigator.of(ctx).pop(),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: const Color(0xFF422F90),
+                                              foregroundColor: Colors.white,
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                              padding: const EdgeInsets.symmetric(vertical: 12),
+                                              elevation: 0,
+                                            ),
+                                            child: const Text('Got it'),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      );
                     },
                 child: Container(
                   padding: const EdgeInsets.all(8),

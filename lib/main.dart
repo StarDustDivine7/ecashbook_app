@@ -1,18 +1,14 @@
+import 'package:ecashbook_app/features/security/pin_provider.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'core/theme.dart';
-import 'features/auth/auth_provider.dart';
-import 'features/security/pin_provider.dart';
-import 'features/auth/login_page.dart';
-import 'features/onboarding/introduction_screen.dart';
-import 'features/permissions/permission_screen.dart';
-import 'features/permissions/location_accuracy_screen.dart';
-import 'features/security/app_passcode_screen.dart';
-import 'features/security/pin_unlock_screen.dart';
-import 'shared/main_layout.dart';
+import 'core/theme/app_theme.dart';
+import 'core/routing/app_router.dart';
+import 'core/prefs_keys.dart';
+
+// Main app class with optimized routing and lazy loading
 
 void main() => runApp(const ProviderScope(child: EcashbookApp()));
 
@@ -23,14 +19,14 @@ class EcashbookApp extends ConsumerStatefulWidget {
   ConsumerState<EcashbookApp> createState() => _EcashbookAppState();
 }
 
-class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBindingObserver {
+class _EcashbookAppState extends ConsumerState<EcashbookApp>
+    with WidgetsBindingObserver {
   final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-
   }
 
   @override
@@ -38,71 +34,6 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
-
-  // —— Splash/Error scaffolds ——
-  Widget _buildErrorApp() => MaterialApp(
-    title: 'EcashBook',
-    debugShowCheckedModeBanner: false,
-    theme: ecTheme,
-    home: Scaffold(
-      backgroundColor: const Color(0xFF422F90),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, color: Colors.white, size: 64),
-            const SizedBox(height: 24),
-            const Text('App Loading Error', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            const Text('Something went wrong during startup', style: TextStyle(color: Colors.white70, fontSize: 16), textAlign: TextAlign.center),
-            const SizedBox(height: 32),
-            ElevatedButton(
-              onPressed: () => SystemNavigator.pop(),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFF422F90)),
-              child: const Text('Restart App'),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-
-  Widget _buildSplashScreen(String message, {String? subtitle}) => MaterialApp(
-    title: 'EcashBook',
-    debugShowCheckedModeBanner: false,
-    theme: ecTheme,
-    home: _buildSplashScreenWidget(message, subtitle: subtitle),
-  );
-
-  Widget _buildSplashScreenWidget(String message, {String? subtitle}) => Scaffold(
-    backgroundColor: const Color(0xFF422F90),
-    body: Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 120,
-            height: 120,
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(20), color: Colors.white.withValues(alpha: 0.1)),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(20),
-              child: Image.asset('assets/icon/icon.png', width: 80, height: 80, errorBuilder: (_, __, ___) => const Icon(Icons.security, size: 64, color: Colors.white)),
-            ),
-          ),
-          const SizedBox(height: 24),
-          const Text('EcashBook', style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white)),
-          const SizedBox(height: 16),
-          Text(message, style: const TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
-          if (subtitle != null) ...[
-            const SizedBox(height: 8),
-            Text(subtitle, style: const TextStyle(fontSize: 14, color: Colors.white70), textAlign: TextAlign.center),
-          ],
-          const SizedBox(height: 32),
-          const CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
-        ],
-      ),
-    ),
-  );
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -114,165 +45,82 @@ class _EcashbookAppState extends ConsumerState<EcashbookApp> with WidgetsBinding
 
   @override
   Widget build(BuildContext context) {
-    return Consumer(builder: (context, ref, child) {
-      try {
-        final authState = ref.watch(authProvider);
-        final pinState = ref.watch(pinProvider);
-        final isPinRequired = pinState.isRequired;
-
-        // Auth initializing splash
-        if (authState.isInitializing) {
-          return _buildSplashScreen('Initializing...', subtitle: 'Setting up your secure workspace');
-        }
-
-        // PIN requirement is handled automatically by the PIN provider
-
-        // When logged-in and PIN is required, show PIN unlock screen
-        if (authState.isLoggedIn && isPinRequired) {
-          return MaterialApp(
-            title: 'EcashBook',
-            debugShowCheckedModeBanner: false,
-            theme: ecTheme,
-            home: const PinUnlockScreen(),
-          );
-        }
-
-        // Main router
-        return MaterialApp(
-          title: 'EcashBook',
-          debugShowCheckedModeBanner: false,
-          theme: ecTheme,
-          navigatorKey: navigatorKey,
-          initialRoute: _getInitialRoute(authState),
-          onGenerateRoute: (settings) => _generateRoute(settings, authState),
+    return MaterialApp.router(
+      title: 'eCashbook',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.lightTheme,
+      themeMode: ThemeMode.light, // Force light theme only
+      routerConfig: AppRouter.router,
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaleFactor: 1.0),
+          child: child!,
         );
-      } catch (e) {
-
-        return _buildErrorApp();
-      }
-    });
-  }
-
-  String _getInitialRoute(AuthState authState) {
-    return '/resolver';
-  }
-
-  Route _generateRoute(RouteSettings settings, AuthState authState) {
-    switch (settings.name) {
-      case '/resolver':
-        return MaterialPageRoute(builder: (_) => _StartupResolver(authState: authState));
-      case '/introduction':
-        return MaterialPageRoute(builder: (_) => const IntroductionScreen(), settings: settings);
-      case '/permissions':
-        return MaterialPageRoute(builder: (_) => const PermissionScreen(), settings: settings);
-      case '/location-accuracy':
-        return MaterialPageRoute(builder: (_) => const LocationAccuracyScreen(), settings: settings);
-      case '/app-passcode':
-        return MaterialPageRoute(builder: (_) => const AppPasscodeScreen(), settings: settings);
-      case '/pin-unlock':
-        return MaterialPageRoute(builder: (_) => const PinUnlockScreen(), settings: settings);
-      case '/login':
-        return MaterialPageRoute(builder: (_) => const LoginPage(), settings: settings);
-      case '/dashboard':
-        return MaterialPageRoute(
-          builder: (_) => PopScope(
-            canPop: false,
-            onPopInvokedWithResult: (didPop, result) {
-              if (!didPop) SystemNavigator.pop();
-            },
-            child: const MainLayout(initialIndex: 2),
-          ),
-          settings: settings,
-        );
-      default:
-        return MaterialPageRoute(builder: (_) => const LoginPage(), settings: const RouteSettings(name: '/login'));
-    }
+      },
+    );
   }
 }
 
-// —— Startup Resolver ——
-class _StartupResolver extends ConsumerStatefulWidget {
-  final AuthState authState;
-  const _StartupResolver({required this.authState});
+// Splash Screen that will be shown on app start
+class SplashScreen extends ConsumerStatefulWidget {
+  const SplashScreen({super.key});
 
   @override
-  ConsumerState<_StartupResolver> createState() => _StartupResolverState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _StartupResolverState extends ConsumerState<_StartupResolver> {
+class _SplashScreenState extends ConsumerState<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _decide();
+    _initializeApp();
   }
 
-  Future _decide() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final isFirstTime = prefs.getBool('is_first_time') ?? true;
-      final onboardingDone = prefs.getBool('onboarding_completed') ?? false;
-      final permsDone = prefs.getBool('permissions_granted') ?? false;
-      final lockSetup = prefs.getBool('lock_setup_completed') ?? false;
-      final hasEverLoggedIn = prefs.getBool('has_ever_logged_in') ?? false;
-      final isLoggedIn = widget.authState.isLoggedIn;
+  Future<void> _initializeApp() async {
+    // Add your app initialization logic here
+    await Future.delayed(const Duration(seconds: 2)); // Simulate loading
 
+    // Ensure PIN provider is initialized by reading it
+    debugPrint('🔐 SplashScreen: Ensuring PIN provider initialization...');
+    ref.read(pinProvider); // This should trigger initialization
 
+    // Wait for PIN provider to fully initialize
+    await Future.delayed(const Duration(milliseconds: 1000));
 
-      // FIRST-TIME APP LAUNCH FLOW
-      if (isFirstTime) {
-        // Step 1: Show Dashboard first (as per requirement)
-        if (!onboardingDone) {
-          // Set a flag to trigger permissions after dashboard is shown
-          await prefs.setBool('show_permissions_after_dashboard', true);
-          _go('/dashboard');
-          return;
+    if (!mounted) return;
+
+    // Check if onboarding is completed
+    final prefs = await SharedPreferences.getInstance();
+    final onboardingCompleted =
+        prefs.getBool(PrefKeys.onboardingCompleted) ?? false;
+
+    if (!onboardingCompleted) {
+      // First time user - show introduction screen
+      context.go('/onboarding');
+    } else {
+      // Onboarding completed - check login state
+      final isLoggedIn = prefs.getBool('user_logged_in') ?? false;
+
+      if (isLoggedIn) {
+        // User is logged in - check if PIN is required
+        final pinState = ref.read(pinProvider);
+
+        debugPrint('🔐 SplashScreen: PIN required = ${pinState.isRequired}');
+
+        if (pinState.isRequired) {
+          // PIN is required - show unlock screen
+          debugPrint('🔐 SplashScreen: Navigating to PIN unlock screen');
+          context.go('/pin-unlock');
+        } else {
+          // No PIN required - go to dashboard
+          debugPrint('🔐 SplashScreen: Navigating to dashboard');
+          context.go('/dashboard');
         }
-
-        // Step 2: Request permissions
-        if (!permsDone) {
-          _go('/permissions');
-          return;
-        }
-
-        // Step 3: Set up lock screen
-        if (!lockSetup) {
-          _go('/app-passcode');
-          return;
-        }
-
-        // Step 4: Show login screen (one-time only)
-        if (!hasEverLoggedIn) {
-          _go('/login');
-          return;
-        }
+      } else {
+        // User not logged in - go to login
+        context.go('/login');
       }
-
-      // NORMAL USAGE AFTER FIRST LOGIN
-      if (hasEverLoggedIn && isLoggedIn) {
-        // Check if PIN is required (app reopen/background)
-        final pin = ref.read(pinProvider);
-        if (pin.isRequired) {
-          _go('/pin-unlock');
-          return;
-        }
-
-        _go('/dashboard');
-        return;
-      }
-
-      // FALLBACK: Not logged in
-      _go('/login');
-    } catch (e) {
-      debugPrint('❌ Startup decision error: $e');
-      _go('/login');
     }
-  }
-
-  void _go(String route) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      Navigator.of(context).pushNamedAndRemoveUntil(route, (r) => false);
-    });
   }
 
   @override
@@ -282,10 +130,32 @@ class _StartupResolverState extends ConsumerState<_StartupResolver> {
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            CircularProgressIndicator(color: Colors.white, strokeWidth: 3),
-            SizedBox(height: 16),
-            Text('Preparing...', style: TextStyle(color: Colors.white)),
+          children: [
+            // Your app logo or loading indicator
+            Container(
+              width: 120,
+              height: 120,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(Icons.account_balance_wallet,
+                  size: 60, color: Colors.white),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'eCashbook',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 16),
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              strokeWidth: 2,
+            ),
           ],
         ),
       ),

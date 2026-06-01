@@ -1,9 +1,12 @@
 import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:local_auth/local_auth.dart';
+import 'package:go_router/go_router.dart';
 
 class AppPasscodeScreen extends ConsumerStatefulWidget {
   const AppPasscodeScreen({super.key});
@@ -11,10 +14,10 @@ class AppPasscodeScreen extends ConsumerStatefulWidget {
   ConsumerState createState() => _AppPasscodeScreenState();
 }
 
-class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with TickerProviderStateMixin {
+class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen>
+    with TickerProviderStateMixin {
   String _pin = '';
   String _firstPin = '';
-  bool _hasPin = false;
   bool _isSetting = false;
   bool _isConfirming = false;
   String? _error;
@@ -22,6 +25,12 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
   late AnimationController _fadeController;
   late Animation<double> _shakeAnimation;
   late Animation<double> _fadeAnimation;
+  
+  // Biometric authentication
+  final LocalAuthentication _localAuth = LocalAuthentication();
+  bool _biometricAvailable = false;
+  bool _biometricEnabled = false;
+  bool _isAuthenticating = false;
 
   @override
   void initState() {
@@ -46,10 +55,40 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
+    final hasPin = (prefs.getString('app_passcode_hash') ?? '').isNotEmpty;
+    final biometricEnabled = prefs.getBool('biometric_enabled') ?? false;
+    
+    debugPrint('🔐 Loading app passcode screen...');
+    debugPrint('🔐 hasPin: $hasPin');
+    debugPrint('🔐 biometricEnabled (saved): $biometricEnabled');
+    
+    // Check if biometric is available
+    bool biometricAvailable = false;
+    try {
+      biometricAvailable = await _localAuth.canCheckBiometrics || await _localAuth.isDeviceSupported();
+      debugPrint('🔐 biometricAvailable: $biometricAvailable');
+    } catch (e) {
+      debugPrint('❌ Error checking biometric availability: $e');
+    }
+    
     setState(() {
-      _hasPin = (prefs.getString('app_passcode_hash') ?? '').isNotEmpty;
-      _isSetting = !_hasPin;
+      _isSetting = !hasPin;
+      _biometricAvailable = biometricAvailable;
+      _biometricEnabled = biometricEnabled && biometricAvailable;
     });
+    
+    debugPrint('🔐 _isSetting: $_isSetting');
+    debugPrint('🔐 _biometricAvailable: $_biometricAvailable');
+    debugPrint('🔐 _biometricEnabled: $_biometricEnabled');
+    
+    // Auto-trigger biometric authentication when unlocking (not setting up) and if enabled
+    if (!_isSetting && _biometricEnabled && _biometricAvailable && !_isAuthenticating) {
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          _authenticateWithBiometric();
+        }
+      });
+    }
   }
 
   String _hash(String input) => sha256.convert(utf8.encode(input)).toString();
@@ -82,9 +121,9 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
       _showError('Enter 4 digits');
       return;
     }
-    
+
     final prefs = await SharedPreferences.getInstance();
-    
+
     if (_isSetting) {
       if (!_isConfirming) {
         // First PIN entry - store it and ask for confirmation
@@ -99,7 +138,7 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
         if (_pin == _firstPin) {
           // PINs match - save and proceed
           await prefs.setString('app_passcode_hash', _hash(_pin));
-          setState(() => _hasPin = true);
+          await prefs.setBool('biometric_enabled', _biometricEnabled);
           _next();
         } else {
           // PINs don't match - show error and restart
@@ -130,17 +169,67 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
     HapticFeedback.heavyImpact();
   }
 
+  Future<void> _authenticateWithBiometric() async {
+    debugPrint('🔐 Biometric authentication triggered');
+    debugPrint('🔐 _isAuthenticating: $_isAuthenticating');
+    debugPrint('🔐 _biometricAvailable: $_biometricAvailable');
+    
+    if (_isAuthenticating) return;
+    
+    // Check if biometric is available
+    if (!_biometricAvailable) {
+      _showError('Biometric authentication not available on this device');
+      return;
+    }
+    
+    setState(() => _isAuthenticating = true);
+    
+    try {
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Authenticate to unlock EcashBook',
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: false,
+        ),
+      );
+      
+      if (authenticated) {
+        // Save biometric preference if user successfully uses it
+        if (!_isSetting) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setBool('biometric_enabled', true);
+        }
+        _next();
+      } else {
+        setState(() {
+          _error = 'Authentication failed. Use PIN instead.';
+          _isAuthenticating = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Biometric authentication error: $e');
+      setState(() {
+        _error = 'Biometric unavailable. Use PIN instead.';
+        _isAuthenticating = false;
+      });
+    }
+  }
+  
   void _next() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('lock_setup_completed', true);
+
+    // Clear PIN requirement flags
+    await prefs.remove('app_was_backgrounded');
+    await prefs.remove('app_paused_time');
 
     final hasEverLoggedIn = prefs.getBool('has_ever_logged_in') ?? false;
     final isFirstTime = prefs.getBool('is_first_time') ?? true;
 
     if (isFirstTime && !hasEverLoggedIn) {
-      Navigator.of(context).pushNamedAndRemoveUntil('/login', (r) => false);
+      context.go('/login');
     } else {
-      Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (r) => false);
+      context.go('/dashboard');
     }
   }
 
@@ -156,8 +245,8 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
     return Scaffold(
       backgroundColor: const Color(0xFF6E48AA),
       body: Container(
-        width: double.infinity,
-        height: double.infinity,
+        width: double.maxFinite,
+        height: double.maxFinite,
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [Color(0xFF422F90), Color(0xFF6E48AA)],
@@ -195,7 +284,7 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                             ),
                           ),
                         ),
-                      
+
                       // App Logo and Title Section
                       Column(
                         children: [
@@ -206,9 +295,8 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                               color: Colors.white.withOpacity(0.15),
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: Colors.white.withOpacity(0.3), 
-                                width: 1.5
-                              ),
+                                  color: Colors.white.withOpacity(0.3),
+                                  width: 1.5),
                             ),
                             child: Icon(
                               Icons.account_balance_wallet_rounded,
@@ -227,8 +315,10 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            _isSetting 
-                                ? (_isConfirming ? 'Confirm your PIN' : 'Set your PIN')
+                            _isSetting
+                                ? (_isConfirming
+                                    ? 'Confirm your PIN'
+                                    : 'Set your PIN')
                                 : 'Enter PIN to unlock',
                             style: TextStyle(
                               fontSize: 15,
@@ -236,7 +326,7 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                               fontWeight: FontWeight.w400,
                             ),
                           ),
-                          
+
                           // Progress indicator for PIN setup
                           if (_isSetting)
                             Padding(
@@ -258,7 +348,7 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                                     height: 6,
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
-                                      color: _isConfirming 
+                                      color: _isConfirming
                                           ? Colors.white.withOpacity(0.8)
                                           : Colors.white.withOpacity(0.3),
                                     ),
@@ -268,9 +358,9 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                             ),
                         ],
                       ),
-                      
+
                       const SizedBox(height: 40),
-                      
+
                       // PIN Input Display
                       AnimatedBuilder(
                         animation: _shakeAnimation,
@@ -278,7 +368,8 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                           return Transform.translate(
                             offset: Offset(_shakeAnimation.value, 0),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 24, vertical: 16),
                               decoration: BoxDecoration(
                                 color: Colors.white.withOpacity(0.15),
                                 borderRadius: BorderRadius.circular(16),
@@ -294,7 +385,8 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                                   return Container(
                                     width: 16,
                                     height: 16,
-                                    margin: const EdgeInsets.symmetric(horizontal: 6),
+                                    margin: const EdgeInsets.symmetric(
+                                        horizontal: 6),
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       color: index < _pin.length
@@ -312,9 +404,9 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                           );
                         },
                       ),
-                      
+
                       const SizedBox(height: 16),
-                      
+
                       // Error Message
                       SizedBox(
                         height: 24,
@@ -329,9 +421,55 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                               )
                             : null,
                       ),
+
+                      const SizedBox(height: 24),
                       
-                      const SizedBox(height: 32),
+                      // Biometric Authentication Button (only when unlocking)
+                      if (!_isSetting && _biometricAvailable)
+                        Column(
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: _isAuthenticating ? null : _authenticateWithBiometric,
+                              icon: Icon(
+                                Icons.fingerprint,
+                                color: Colors.white.withOpacity(0.9),
+                                size: 24,
+                              ),
+                              label: Text(
+                                _isAuthenticating ? 'Authenticating...' : 'Use Biometric',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.9),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 24,
+                                  vertical: 12,
+                                ),
+                                side: BorderSide(
+                                  color: Colors.white.withOpacity(0.4),
+                                  width: 1.5,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'or enter PIN below',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.6),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
                       
+                      const SizedBox(height: 24),
+
                       // Keypad
                       Container(
                         constraints: const BoxConstraints(maxWidth: 260),
@@ -344,9 +482,11 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                               ['', '0', '⌫']
                             ])
                               Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 6.0),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 6.0),
                                 child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceEvenly,
                                   children: [
                                     for (var key in row)
                                       key.isEmpty
@@ -361,14 +501,49 @@ class _AppPasscodeScreenState extends ConsumerState<AppPasscodeScreen> with Tick
                           ],
                         ),
                       ),
+
+                      const SizedBox(height: 24),
                       
-                      const SizedBox(height: 32),
-                      
+                      // Enable/Disable Biometric (only during setup and if available)
+                      if (_isSetting && _isConfirming && _biometricAvailable)
+                        Column(
+                          children: [
+                            CheckboxListTile(
+                              value: _biometricEnabled,
+                              onChanged: (value) {
+                                setState(() => _biometricEnabled = value ?? false);
+                              },
+                              title: Text(
+                                'Enable Biometric Authentication',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.9),
+                                  fontSize: 14,
+                                ),
+                              ),
+                              subtitle: Text(
+                                'Use fingerprint or face unlock',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.6),
+                                  fontSize: 12,
+                                ),
+                              ),
+                              activeColor: Colors.white,
+                              checkColor: const Color(0xFF422F90),
+                              tileColor: Colors.white.withOpacity(0.1),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                          ],
+                        ),
+
                       // Exit Button
                       TextButton(
                         onPressed: () => SystemNavigator.pop(),
                         style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 20, vertical: 8),
                         ),
                         child: Text(
                           'Exit App',

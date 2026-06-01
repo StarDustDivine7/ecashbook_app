@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:go_router/go_router.dart';
+import 'package:ecashbook_app/core/prefs_keys.dart';
 
 class IntroductionScreen extends ConsumerStatefulWidget {
   const IntroductionScreen({super.key});
@@ -16,19 +18,22 @@ class _IntroductionScreenState extends ConsumerState<IntroductionScreen> {
   final List<IntroPage> _pages = [
     IntroPage(
       title: "Welcome EcashBook",
-      description: "Your complete digital workplace solution designed for modern teams. Streamline attendance, payroll, and HR management in one powerful platform.",
+      description:
+          "Your complete digital workplace solution designed for modern teams. Streamline attendance, payroll, and HR management in one powerful platform.",
       imagePath: "assets/images/white-logo.png",
       gradient: [Color(0xFF422F90), Color(0xFF5B42A8)],
     ),
     IntroPage(
       title: "Smart Attendance",
-      description: "Track your work hours with precision using biometric authentication. Real-time GPS location tracking with automated overtime calculations.",
+      description:
+          "Track your work hours with precision using biometric authentication. Real-time GPS location tracking with automated overtime calculations.",
       imagePath: "assets/images/time-tracking.png",
       gradient: [Color(0xFF5B42A8), Color(0xFF6D54C0)],
     ),
     IntroPage(
       title: "Complete HR",
-      description: "Manage payslips, leaves, tasks, and team performance seamlessly. Digital payroll system with one-click leave applications and analytics.",
+      description:
+          "Manage payslips, leaves, tasks, and team performance seamlessly. Digital payroll system with one-click leave applications and analytics.",
       imagePath: "assets/images/hr-suite.png",
       gradient: [Color(0xFF6D54C0), Color(0xFF7F66D8)],
     ),
@@ -59,17 +64,20 @@ class _IntroductionScreenState extends ConsumerState<IntroductionScreen> {
                   children: [
                     // Progress indicators
                     Row(
-                      children: List.generate(3, (index) =>
-                          AnimatedContainer(
-                            duration: Duration(milliseconds: 300),
-                            margin: EdgeInsets.only(right: 8),
-                            height: 4,
-                            width: _currentPage == index ? 32 : 12,
-                            decoration: BoxDecoration(
-                              color: _currentPage == index ? Colors.white : Colors.white.withValues(alpha: 0.4),
-                              borderRadius: BorderRadius.circular(2),
-                            ),
+                      children: List.generate(
+                        3,
+                        (index) => AnimatedContainer(
+                          duration: Duration(milliseconds: 300),
+                          margin: EdgeInsets.only(right: 8),
+                          height: 4,
+                          width: _currentPage == index ? 32 : 12,
+                          decoration: BoxDecoration(
+                            color: _currentPage == index
+                                ? Colors.white
+                                : Colors.white.withValues(alpha: 0.4),
+                            borderRadius: BorderRadius.circular(2),
                           ),
+                        ),
                       ),
                     ),
                     // Skip button
@@ -92,7 +100,8 @@ class _IntroductionScreenState extends ConsumerState<IntroductionScreen> {
               Expanded(
                 child: PageView.builder(
                   controller: _pageController,
-                  onPageChanged: (index) => setState(() => _currentPage = index),
+                  onPageChanged: (index) =>
+                      setState(() => _currentPage = index),
                   itemCount: _pages.length,
                   itemBuilder: (context, index) {
                     final page = _pages[index];
@@ -103,7 +112,7 @@ class _IntroductionScreenState extends ConsumerState<IntroductionScreen> {
                         children: [
                           // Large Image
                           Container(
-                            width: screenWidth * 0.6,  // 60% of screen width
+                            width: screenWidth * 0.6, // 60% of screen width
                             height: screenHeight * 0.35, // 35% of screen height
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(20),
@@ -123,13 +132,15 @@ class _IntroductionScreenState extends ConsumerState<IntroductionScreen> {
                                 errorBuilder: (context, error, stackTrace) {
                                   return Container(
                                     decoration: BoxDecoration(
-                                      color: Colors.white.withValues(alpha: 0.2),
+                                      color:
+                                          Colors.white.withValues(alpha: 0.2),
                                       borderRadius: BorderRadius.circular(20),
                                     ),
                                     child: Icon(
                                       Icons.business,
                                       size: 80,
-                                      color: Colors.white.withValues(alpha: 0.8),
+                                      color:
+                                          Colors.white.withValues(alpha: 0.8),
                                     ),
                                   );
                                 },
@@ -155,7 +166,8 @@ class _IntroductionScreenState extends ConsumerState<IntroductionScreen> {
 
                           // Description (10-15 words)
                           Container(
-                            padding: EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+                            padding: EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 20),
                             decoration: BoxDecoration(
                               color: Colors.black.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(16),
@@ -191,20 +203,22 @@ class _IntroductionScreenState extends ConsumerState<IntroductionScreen> {
                     // Previous button
                     _currentPage > 0
                         ? TextButton.icon(
-                      onPressed: () => _pageController.previousPage(
-                        duration: Duration(milliseconds: 300),
-                        curve: Curves.easeInOut,
-                      ),
-                      icon: Icon(Icons.arrow_back_ios, color: Colors.white.withValues(alpha: 0.8), size: 18),
-                      label: Text(
-                        'Previous',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.8),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    )
+                            onPressed: () => _pageController.previousPage(
+                              duration: Duration(milliseconds: 300),
+                              curve: Curves.easeInOut,
+                            ),
+                            icon: Icon(Icons.arrow_back_ios,
+                                color: Colors.white.withValues(alpha: 0.8),
+                                size: 18),
+                            label: Text(
+                              'Previous',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.8),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          )
                         : SizedBox(width: 80),
 
                     // Next/Get Started button
@@ -212,13 +226,14 @@ class _IntroductionScreenState extends ConsumerState<IntroductionScreen> {
                       onPressed: _currentPage == 2
                           ? () => _navigateToPermissions()
                           : () => _pageController.nextPage(
-                        duration: Duration(milliseconds: 300),
-                        curve: Curves.easeInOut,
-                      ),
+                                duration: Duration(milliseconds: 300),
+                                curve: Curves.easeInOut,
+                              ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
                         foregroundColor: _pages[_currentPage].gradient[0],
-                        padding: EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(25),
                         ),
@@ -236,7 +251,9 @@ class _IntroductionScreenState extends ConsumerState<IntroductionScreen> {
                           ),
                           SizedBox(width: 8),
                           Icon(
-                            _currentPage == 2 ? Icons.rocket_launch : Icons.arrow_forward_ios,
+                            _currentPage == 2
+                                ? Icons.rocket_launch
+                                : Icons.arrow_forward_ios,
                             size: 18,
                           ),
                         ],
@@ -254,8 +271,9 @@ class _IntroductionScreenState extends ConsumerState<IntroductionScreen> {
 
   void _navigateToPermissions() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('onboarding_completed', true);
-    Navigator.pushReplacementNamed(context, '/permissions');
+    await prefs.setBool(PrefKeys.onboardingCompleted, true);
+    if (!mounted) return;
+    context.go('/permissions');
   }
 }
 

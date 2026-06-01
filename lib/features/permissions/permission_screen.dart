@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:go_router/go_router.dart';
 
 class PermissionScreen extends ConsumerStatefulWidget {
   const PermissionScreen({super.key});
@@ -260,7 +261,7 @@ class _PermissionScreenState extends ConsumerState<PermissionScreen> {
   }
 
   void _navigateToLockSetup() {
-    Navigator.pushReplacementNamed(context, '/app-passcode');
+    context.go('/app-passcode');
   }
 
   void _showPermissionError() {

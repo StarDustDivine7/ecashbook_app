@@ -1,6 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'leave_service.dart';
+import '../../core/services/leave_api_service.dart';
+import '../../core/services/auth_service.dart';
+import '../../shared/bottom_menu.dart';
+import '../../shared/main_layout.dart';
+
+final leaveDetailsProvider = FutureProvider.family<LeaveRequest, String>((ref, leaveId) async {
+  final user = await AuthService.getSavedUser();
+  final secure = await AuthService.getSecure();
+  if (user == null || secure == null) {
+    throw Exception('Session expired. Please login again.');
+  }
+  final res = await LeaveApiService.getLeaveDetails(
+    empId: user.employeeId,
+    leaveId: leaveId,
+    secure: secure,
+  );
+  if (res['success'] == true && res['data'] != null) {
+    final data = res['data'] as Map<String, dynamic>;
+    return LeaveRequest.fromJson(data);
+  }
+  throw Exception(res['message'] ?? 'Failed to fetch leave details');
+});
 
 class LeaveStatusPage extends ConsumerWidget {
   final String requestId;
@@ -26,7 +48,14 @@ class LeaveStatusPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(leaveServiceProvider);
     final leaveService = ref.read(leaveServiceProvider.notifier);
-    final request = leaveService.getLeaveRequestById(requestId);
+    final baseRequest = leaveService.getLeaveRequestById(requestId);
+    final details = ref.watch(leaveDetailsProvider(requestId));
+
+    final request = details.when<LeaveRequest?>(
+      data: (value) => value,
+      loading: () => baseRequest,
+      error: (_, __) => baseRequest,
+    );
 
     if (request == null) {
       return Scaffold(
@@ -37,6 +66,15 @@ class LeaveStatusPage extends ConsumerWidget {
         ),
         body: const Center(
           child: Text('Leave request not found'),
+        ),
+        bottomNavigationBar: BottomMenuBar(
+          currentIndex: 3,
+          onTap: (index) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => MainLayout(initialIndex: index)),
+            );
+          },
         ),
       );
     }
@@ -56,6 +94,16 @@ class LeaveStatusPage extends ConsumerWidget {
       body: SingleChildScrollView(
         child: Column(
           children: [
+            if (details.isLoading)
+              const LinearProgressIndicator(minHeight: 3),
+            if (details.hasError)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  details.error.toString(),
+                  style: const TextStyle(color: Colors.red, fontSize: 12),
+                ),
+              ),
             // Enhanced Status Card
             _buildEnhancedStatusCard(request),
 
@@ -68,6 +116,15 @@ class LeaveStatusPage extends ConsumerWidget {
             const SizedBox(height: 20),
           ],
         ),
+      ),
+      bottomNavigationBar: BottomMenuBar(
+        currentIndex: 3,
+        onTap: (index) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => MainLayout(initialIndex: index)),
+          );
+        },
       ),
     );
   }

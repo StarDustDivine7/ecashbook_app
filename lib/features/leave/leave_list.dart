@@ -2,11 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'leave_service.dart';
 import 'leave_status.dart';
-import 'apply_leave.dart'; // ✅ ADD: Import ApplyLeavePage
+import 'apply_leave.dart';
+import '../../shared/bottom_sheet_host.dart';
+import '../../shared/fullscreen_bottom_sheet.dart';
 
-class LeaveListPage extends ConsumerWidget {
+class LeaveListPage extends ConsumerStatefulWidget {
   const LeaveListPage({super.key});
 
+  @override
+  ConsumerState<LeaveListPage> createState() => _LeaveListPageState();
+}
+
+class _LeaveListPageState extends ConsumerState<LeaveListPage> {
   // Premium Design Colors
   static const Color _primaryPurple = Color(0xFF6366F1);
   static const Color _primaryDark = Color(0xFF4338CA);
@@ -20,9 +27,19 @@ class LeaveListPage extends ConsumerWidget {
   static const Color _borderColor = Color(0xFFE2E8F0);
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  void initState() {
+    super.initState();
+    print('🟢 ========== LEAVE LIST SCREEN INITSTATE ==========');
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(leaveServiceProvider.notifier).loadLeaveList();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final leaveRequests = ref.watch(leaveServiceProvider);
     final statistics = ref.watch(leaveStatisticsProvider);
+    final leaveService = ref.read(leaveServiceProvider.notifier);
 
     return Scaffold(
       backgroundColor: _surfaceColor,
@@ -30,19 +47,31 @@ class LeaveListPage extends ConsumerWidget {
         child: Column(
           children: [
             // Header Card
-            _buildHeaderCard(statistics),
+            _buildHeaderCard(statistics, ref),
 
             // Leave Requests List
             Expanded(
-              child: leaveRequests.isEmpty
-                  ? _buildEmptyState()
-                  : ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                itemCount: leaveRequests.length,
-                itemBuilder: (context, index) {
-                  final request = leaveRequests[index];
-                  return _buildLeaveRequestCard(context, request);
+              child: RefreshIndicator(
+                onRefresh: () async {
+                  await leaveService.loadLeaveList();
                 },
+                color: _primaryPurple,
+                child: leaveService.isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : (leaveService.error != null)
+                        ? _buildErrorState(leaveService.error!, leaveService)
+                        : (leaveRequests.isEmpty
+                            ? _buildEmptyState(leaveService)
+                            : ListView.builder(
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 20),
+                                itemCount: leaveRequests.length,
+                                itemBuilder: (context, index) {
+                                  final request = leaveRequests[index];
+                                  return _buildLeaveRequestCard(
+                                      context, request);
+                                },
+                              )),
               ),
             ),
           ],
@@ -73,20 +102,18 @@ class LeaveListPage extends ConsumerWidget {
           ],
         ),
         child: FloatingActionButton(
+          heroTag: 'leaveFab',
           onPressed: () {
-            // ✅ Navigate to Apply Leave Page
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const ApplyLeavePage(),
-              ),
+            showFullscreenBottomSheet(
+              context: context,
+              title: 'Apply for Leave',
+              child: const ApplyLeavePage(),
             );
           },
           backgroundColor: Colors.transparent,
           elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: const Icon(
             Icons.add_rounded,
             color: Colors.white,
@@ -94,11 +121,137 @@ class LeaveListPage extends ConsumerWidget {
           ),
         ),
       ),
+
+      // floatingActionButton: Container(
+      //   decoration: BoxDecoration(
+      //     gradient: LinearGradient(
+      //       colors: [_primaryPurple, _primaryDark],
+      //       begin: Alignment.topLeft,
+      //       end: Alignment.bottomRight,
+      //     ),
+      //     borderRadius: BorderRadius.circular(16),
+      //     boxShadow: [
+      //       BoxShadow(
+      //         color: _primaryPurple.withValues(alpha: 0.4),
+      //         blurRadius: 20,
+      //         offset: const Offset(0, 8),
+      //         spreadRadius: 2,
+      //       ),
+      //       BoxShadow(
+      //         color: _primaryPurple.withValues(alpha: 0.2),
+      //         blurRadius: 30,
+      //         offset: const Offset(0, 15),
+      //       ),
+      //     ],
+      //   ),
+      //   child: FloatingActionButton(
+      //     heroTag: 'leaveFab',
+      //     onPressed: () {
+      //       // Prefer persistent bottom sheet via BottomSheetHost to keep bottom nav visible
+      //       final host = BottomSheetHost.of(context);
+      //       if (host != null) {
+      //         late PersistentBottomSheetController sheetController;
+      //         sheetController = host.show((ctx) {
+      //           final h = MediaQuery.of(ctx).size.height;
+      //           return PopScope(
+      //             canPop: false,
+      //             onPopInvokedWithResult: (didPop, result) async {
+      //               sheetController.close();
+      //             },
+      //             child: SafeArea(
+      //               top: false,
+      //               child: AnimatedPadding(
+      //                 duration: const Duration(milliseconds: 200),
+      //                 curve: Curves.easeOut,
+      //                 padding: EdgeInsets.only(
+      //                   bottom: MediaQuery.of(ctx).viewInsets.bottom,
+      //                 ),
+      //                 child: Container(
+      //                   color: Colors.white,
+      //                   child: SizedBox(
+      //                     height: h * 0.95,
+      //                     child: Column(
+      //                       crossAxisAlignment: CrossAxisAlignment.stretch,
+      //                       children: [
+      //                         Container(
+      //                           padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+      //                           decoration: BoxDecoration(
+      //                             gradient: LinearGradient(
+      //                               colors: [_primaryPurple, _primaryDark],
+      //                               begin: Alignment.topLeft,
+      //                               end: Alignment.bottomRight,
+      //                             ),
+      //                           ),
+      //                           child: Row(
+      //                             children: [
+      //                               const Expanded(
+      //                                 child: Text(
+      //                                   'Apply for Leave',
+      //                                   style: TextStyle(
+      //                                     color: Colors.white,
+      //                                     fontSize: 18,
+      //                                     fontWeight: FontWeight.w700,
+      //                                   ),
+      //                                 ),
+      //                               ),
+      //                               IconButton(
+      //                                 onPressed: () {
+      //                                   sheetController.close();
+      //                                 },
+      //                                 icon: const Icon(
+      //                                   Icons.close_rounded,
+      //                                   color: Colors.white,
+      //                                 ),
+      //                               ),
+      //                             ],
+      //                           ),
+      //                         ),
+      //                         const Expanded(
+      //                           child: ApplyLeavePage(),
+      //                         ),
+      //                       ],
+      //                     ),
+      //                   ),
+      //                 ),
+      //               ),
+      //             ),
+      //           );
+      //         });
+      //       } else {
+      //         // Fallback to modal bottom sheet if host is unavailable
+      //         showModalBottomSheet(
+      //           context: context,
+      //           isScrollControlled: true,
+      //           useSafeArea: true,
+      //           showDragHandle: true,
+      //           backgroundColor: Colors.transparent,
+      //           builder: (ctx) => Padding(
+      //             padding: MediaQuery.of(ctx).viewInsets,
+      //             child: const FractionallySizedBox(
+      //               heightFactor: 0.95,
+      //               child: ApplyLeavePage(),
+      //             ),
+      //           ),
+      //         );
+      //       }
+      //     },
+      //     backgroundColor: Colors.transparent,
+      //     elevation: 0,
+      //     shape: RoundedRectangleBorder(
+      //       borderRadius: BorderRadius.circular(16),
+      //     ),
+      //     child: const Icon(
+      //       Icons.add_rounded,
+      //       color: Colors.white,
+      //       size: 28,
+      //     ),
+      //   ),
+      // ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
-  Widget _buildHeaderCard(Map<String, int> stats) {
+  Widget _buildHeaderCard(Map<String, int> stats, WidgetRef ref) {
     return Container(
       margin: const EdgeInsets.all(20),
       padding: const EdgeInsets.all(20),
@@ -144,6 +297,19 @@ class LeaveListPage extends ConsumerWidget {
                   ),
                 ),
               ),
+              // Refresh Button
+              IconButton(
+                onPressed: () async {
+                  print('🔄 Manual refresh button clicked');
+                  await ref.read(leaveServiceProvider.notifier).loadLeaveList();
+                },
+                icon: const Icon(
+                  Icons.refresh_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
+                tooltip: 'Refresh leave list',
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -157,6 +323,61 @@ class LeaveListPage extends ConsumerWidget {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState(String message, LeaveService leaveService) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: _errorRed.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(50),
+              ),
+              child: Icon(
+                Icons.error_outline_rounded,
+                color: _errorRed,
+                size: 48,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: _textLight,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: () async {
+                await leaveService.loadLeaveList();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primaryPurple,
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text(
+                'Try Again',
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -309,7 +530,7 @@ class LeaveListPage extends ConsumerWidget {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(LeaveService leaveService) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,

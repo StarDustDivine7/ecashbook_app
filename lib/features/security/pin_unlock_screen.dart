@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:local_auth/local_auth.dart';
 import '../../core/constants.dart';
 import 'pin_provider.dart';
 
@@ -19,17 +21,24 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
   String _pin = '';
   late AnimationController _shakeController;
   late Animation<double> _shakeAnimation;
-  
+
   bool _isLoading = false;
   String? _errorMessage;
   int _attemptCount = 0;
   static const int _maxAttempts = AppConstants.maxPinAttempts;
+
+  // Biometric authentication
+  final LocalAuthentication _localAuth = LocalAuthentication();
+  bool _biometricAvailable = false;
+  bool _biometricEnabled = false;
+  bool _isAuthenticating = false;
 
   @override
   void initState() {
     super.initState();
     _initAnimations();
     _setSystemUIOverlay();
+    _checkBiometricAndAutoAuthenticate();
   }
 
   void _setSystemUIOverlay() {
@@ -56,6 +65,38 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
     _shakeAnimation = Tween<double>(begin: 0, end: 10).animate(
       CurvedAnimation(parent: _shakeController, curve: Curves.elasticIn),
     );
+  }
+
+  Future<void> _checkBiometricAndAutoAuthenticate() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final biometricEnabled = prefs.getBool('biometric_enabled') ?? false;
+
+      // Check if biometric is available
+      bool biometricAvailable = false;
+      try {
+        biometricAvailable = await _localAuth.canCheckBiometrics ||
+            await _localAuth.isDeviceSupported();
+      } catch (e) {
+        debugPrint('Error checking biometric availability: $e');
+      }
+
+      setState(() {
+        _biometricAvailable = biometricAvailable;
+        _biometricEnabled = biometricEnabled && biometricAvailable;
+      });
+
+      // Auto-trigger biometric authentication if enabled
+      if (_biometricEnabled && _biometricAvailable && !_isAuthenticating) {
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            _authenticateWithBiometric();
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Error initializing biometric: $e');
+    }
   }
 
   @override
@@ -108,33 +149,36 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
       final savedHash = prefs.getString('app_passcode_hash') ?? '';
       final enteredHash = _hashPin(_pin);
 
-      await Future.delayed(const Duration(milliseconds: 500)); // Simulate processing
+      await Future.delayed(
+          const Duration(milliseconds: 500)); // Simulate processing
 
       if (savedHash == enteredHash) {
         // PIN is correct
-        
+
         // Clear attempt count and PIN requirement
         await prefs.remove('pin_attempt_count');
         await prefs.remove('app_was_backgrounded');
         await prefs.remove('app_paused_time');
         ref.read(pinProvider.notifier).clearPinRequired();
-        
-        // Restore system UI and navigate to dashboard
+
+        // Restore system UI and navigate to dashboard using GoRouter
         _restoreSystemUIOverlay();
         if (mounted) {
-          Navigator.of(context).pushNamedAndRemoveUntil('/dashboard', (route) => false);
+          // Use pages-safe navigation
+          context.go('/dashboard');
         }
       } else {
         // PIN is incorrect
         _attemptCount++;
         await prefs.setInt('pin_attempt_count', _attemptCount);
-        
+
         if (_attemptCount >= _maxAttempts) {
           _showError('Too many failed attempts. Please restart the app.');
         } else {
-          _showError('Incorrect PIN. ${_maxAttempts - _attemptCount} attempts remaining.');
+          _showError(
+              'Incorrect PIN. ${_maxAttempts - _attemptCount} attempts remaining.');
         }
-        
+
         _shakeController.forward().then((_) => _shakeController.reset());
         setState(() => _pin = '');
       }
@@ -155,6 +199,61 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
         setState(() => _errorMessage = null);
       }
     });
+  }
+
+  Future<void> _authenticateWithBiometric() async {
+    debugPrint('🔐 Biometric authentication triggered');
+    debugPrint('🔐 _isAuthenticating: $_isAuthenticating');
+    debugPrint('🔐 _biometricAvailable: $_biometricAvailable');
+
+    if (_isAuthenticating) return;
+
+    // Check if biometric is available
+    if (!_biometricAvailable) {
+      _showError('Biometric authentication not available on this device');
+      return;
+    }
+
+    setState(() => _isAuthenticating = true);
+
+    try {
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Authenticate to unlock EcashBook',
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: false,
+        ),
+      );
+
+      if (authenticated) {
+        // Clear flags and navigate
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('pin_attempt_count');
+        await prefs.remove('app_was_backgrounded');
+        await prefs.remove('app_paused_time');
+
+        // Save biometric preference if user successfully uses it
+        await prefs.setBool('biometric_enabled', true);
+
+        ref.read(pinProvider.notifier).clearPinRequired();
+
+        _restoreSystemUIOverlay();
+        if (mounted) {
+          context.go('/dashboard');
+        }
+      } else {
+        setState(() {
+          _errorMessage = 'Authentication failed. Use PIN instead.';
+          _isAuthenticating = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Biometric authentication error: $e');
+      setState(() {
+        _errorMessage = 'Biometric unavailable. Use PIN instead.';
+        _isAuthenticating = false;
+      });
+    }
   }
 
   void _exitApp() {
@@ -206,9 +305,8 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
                               color: Colors.white.withOpacity(0.15),
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: Colors.white.withOpacity(0.3), 
-                                width: 1.5
-                              ),
+                                  color: Colors.white.withOpacity(0.3),
+                                  width: 1.5),
                             ),
                             child: Icon(
                               Icons.account_balance_wallet_rounded,
@@ -236,9 +334,9 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
                           ),
                         ],
                       ),
-                      
+
                       const SizedBox(height: 32),
-                      
+
                       // PIN Input Display
                       AnimatedBuilder(
                         animation: _shakeAnimation,
@@ -246,12 +344,13 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
                           return Transform.translate(
                             offset: Offset(_shakeAnimation.value, 0),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 20, vertical: 14),
                               decoration: BoxDecoration(
                                 color: Colors.white.withOpacity(0.15),
                                 borderRadius: BorderRadius.circular(14),
                                 border: Border.all(
-                                  color: _errorMessage != null 
+                                  color: _errorMessage != null
                                       ? Colors.redAccent.withOpacity(0.8)
                                       : Colors.white.withOpacity(0.25),
                                   width: 1,
@@ -264,7 +363,8 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
                                   return Container(
                                     width: 14,
                                     height: 14,
-                                    margin: const EdgeInsets.symmetric(horizontal: 5),
+                                    margin: const EdgeInsets.symmetric(
+                                        horizontal: 5),
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       color: index < _pin.length
@@ -282,9 +382,9 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
                           );
                         },
                       ),
-                      
+
                       const SizedBox(height: 12),
-                      
+
                       // Error Message
                       SizedBox(
                         height: 20,
@@ -300,9 +400,59 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
                               )
                             : null,
                       ),
-                      
-                      const SizedBox(height: 24),
-                      
+
+                      const SizedBox(height: 20),
+
+                      // Biometric Authentication Button
+                      if (_biometricAvailable)
+                        Column(
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: _isAuthenticating
+                                  ? null
+                                  : _authenticateWithBiometric,
+                              icon: Icon(
+                                Icons.fingerprint,
+                                color: Colors.white.withOpacity(0.9),
+                                size: 22,
+                              ),
+                              label: Text(
+                                _isAuthenticating
+                                    ? 'Authenticating...'
+                                    : 'Use Biometric',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.9),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical: 10,
+                                ),
+                                side: BorderSide(
+                                  color: Colors.white.withOpacity(0.4),
+                                  width: 1.5,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'or enter PIN below',
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.6),
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
+                        ),
+
+                      const SizedBox(height: 20),
+
                       // Keypad
                       Container(
                         constraints: const BoxConstraints(maxWidth: 220),
@@ -315,9 +465,11 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
                               ['', '0', '⌫']
                             ])
                               Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 4.0),
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 4.0),
                                 child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceEvenly,
                                   children: [
                                     for (var key in row)
                                       key.isEmpty
@@ -332,9 +484,9 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
                           ],
                         ),
                       ),
-                      
+
                       const SizedBox(height: 20),
-                      
+
                       // Loading or Instructions
                       if (_isLoading)
                         Column(
@@ -353,14 +505,15 @@ class _PinUnlockScreenState extends ConsumerState<PinUnlockScreen>
                             ),
                           ],
                         ),
-                      
+
                       const SizedBox(height: 24),
-                      
+
                       // Exit Button
                       TextButton(
                         onPressed: _exitApp,
                         style: TextButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 6),
                         ),
                         child: Text(
                           'Exit App',
